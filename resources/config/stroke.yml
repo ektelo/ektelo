@@ -1,0 +1,31 @@
+# Each config specifies multiple fields to be extracted from the csv.
+# Each field must specify both bins and domain.
+# Fields may optionally specify an value_map.
+#
+# bins - Number of bins, or an explicit division of bins given as
+#        a list of bin boundaries. This is given as an argument to
+#        numpy.histogramdd.
+#
+# domain - The overall domain for the field, provided either as
+#          a list [lower bound, upper bound] or the string 'active',
+#          which indicates the active domain should be used. If a
+#          domain isn't provided the active domain will be used.
+#
+# value_map (optional) - A dictionary that maps non-numerical
+#                       field values to a number so that they can be
+#                       properly added to a histogram.
+stroke_1D_config:
+    age:
+        bins: 64
+        domain: [0,100]
+        type: discrete
+
+stroke_2D_config:
+    age:
+        bins: 64
+        domain: [0,100]
+        type: discrete
+    rsbp:
+        bins: 64
+        domain: [70,300]
+        type: discrete
