@@ -1,0 +1,10 @@
+__pycache__
+*.so
+*.c
+build
+ektelo/algorithm/dawa/cutils/cutil.py
+ektelo/algorithm/dawa/cutils/cutil_wrap.cpp
+ektelo/algorithm/thirdparty/xiaokui/structFirst.py
+ektelo/algorithm/thirdparty/xiaokui/structFirst_wrap.cpp
+
+ektelo/algorithm/privBayes/privBayesSelect.cpp
