@@ -18,7 +18,7 @@ class DelegateMatrix:
     # DelegateMatrix(s) * DelegateMatrix(s.T)
     #
     # Doesn't work:
-    # m * m
+    # m * m.T
 
     def __init__(self, mat):
         self._mat = mat
