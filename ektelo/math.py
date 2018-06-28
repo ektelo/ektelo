@@ -1,4 +1,5 @@
 import inspect
+import numpy as np
 
 class DelegateMatrix:
     # import numpy as np; from scipy import sparse; from ektelo.math import DelegateMatrix; s = sparse.csr_matrix((3, 4), dtype=np.int8); m = DelegateMatrix(s)
@@ -15,34 +16,43 @@ class DelegateMatrix:
     # np.abs(m)
     # np.sum(m)
     # m.T
-    # DelegateMatrix(s) * DelegateMatrix(s.T)
+    # m * m.T
+    # m * s.T
     #
     # Doesn't work:
-    # m * m.T
+    # s * m.T
 
     def __init__(self, mat):
         self._mat = mat
-        self.local_members = [member[0] for member in inspect.getmembers(DelegateMatrix)] 
-        self.delegate_members = [member[0] for member in inspect.getmembers(self._mat)]
 
-    def __dir__(self):
-        return sorted(set(self.local_members).union(set(self.delegate_members)))
-
-    def __add__(self, other):
-        print('adding', self, other)
-        return self._mat + other._mat
-    
-    def __mul__(self, other):
-        print('multiplying', self, other)
-        return self._mat * other._mat
- 
     def __abs__(self):
         print('absing', self)
         return self._mat.__abs__()
- 
-    def __getattr__(self, name):
-        if name not in self.local_members:
-            print('delegating', self, name)
-            return getattr(self._mat, name)
-            
 
+    def __add__(self, other):
+        print('adding', self, other)
+        if type(other) == DelegateMatrix:
+            other = other._mat
+        return DelegateMatrix(self._mat + other)
+
+    def __mul__(self, other):
+        print('multiplying', self, other)
+        if type(other) == DelegateMatrix:
+            other = other._mat
+        return DelegateMatrix(self._mat * other)
+ 
+    @property
+    def dtype(self):
+        return self._mat.dtype
+
+    @property
+    def ndim(self):
+        return self._mat.ndim
+    
+    @property
+    def T(self):
+        return DelegateMatrix(self._mat.T)
+ 
+    @property
+    def shape(self):
+        return self._mat.shape
