@@ -27,6 +27,7 @@ class DelegateMatrix(scipy.sparse.linalg.LinearOperator):
     # m.T
     # m * m.T
     # m * s.T
+    # scipy.sparse.linalg.lsmr(m, b)
     #
     # Doesn't work:
     # s * m.T
