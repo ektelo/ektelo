@@ -50,6 +50,9 @@ class DelegateMatrix(scipy.sparse.linalg.LinearOperator):
     def __add__(self, other):
         if type(other) == DelegateMatrix:
             other = other._mat
+        else:
+            raise TypeError('incompatible type %s for multiplication with DelegateMatrix' % type(other))
+
         return DelegateMatrix(self._mat + other)
 
     def __mul__(self, other):
