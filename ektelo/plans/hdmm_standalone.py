@@ -412,7 +412,7 @@ class AGrid(Base):
             sub_domain_shape = sub_domains[i]
 
             M_i = math.DelegateMatrix(selection.AdaptiveGrid(sub_domain_shape, 
-										                     x_hat_i.toarray(), 
+										                     x_hat_i, 
 										                     (1-self.alpha)*eps, 
 										                     c2=self.c2).select())
             y_i = measurement.Laplace(M_i, (1-self.alpha)*eps).measure(x_i, prng)
