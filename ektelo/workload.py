@@ -30,7 +30,7 @@ class Workload(Marshallable):
     def compile(self):
         return self
 
-    def get_matrix(self, matrix_format = 'sparse'):
+    def get_matrix(self, matrix_format = 'delegate_matrix'):
         """
         Produces the matrix represenation of this workload on the flatten domain.
         Note that W.evaluate(X) = W.get_matrix().dot(X.flatten()) where X is a ndarray 
@@ -57,6 +57,10 @@ class Workload(Marshallable):
             self._matrix['sparse'] = self.compute_matrix_sparse()
         elif matrix_format == 'linop':
             self._matrix['linop'] = self.compute_matrix_linop()
+        elif matrix_format == 'delegate_matrix':
+            from ektelo.math import DelegateMatrix
+            self._matrix['delegate_matrix'] = DelegateMatrix(self.compute_matrix_sparse())
+
         return self._matrix[matrix_format]
 
     matrix = property(get_matrix)

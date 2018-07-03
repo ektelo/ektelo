@@ -3,6 +3,11 @@ import numpy as np
 import scipy.sparse
 from scipy.sparse import spmatrix
 
+def vstack(dmatrices, format=None, dtype=None):
+    blocks = [dmat.tocsr() for dmat in dmatrices]
+
+    return DelegateMatrix(scipy.sparse.vstack(blocks, format, dtype))
+
 class DelegateMatrix:
     # import numpy as np; from scipy import sparse; from ektelo.math import DelegateMatrix; s = sparse.csr_matrix((3, 4), dtype=np.int8); m = DelegateMatrix(s)
     #
@@ -27,22 +32,55 @@ class DelegateMatrix:
     def __init__(self, mat):
         self._mat = mat
 
+    def _wrap(self, result):
+        if np.isscalar(result):
+            return result
+        else:
+            return DelegateMatrix(result)
+
     def __abs__(self):
-        print('absing', self)
-        return self._mat.__abs__()
+        return DelegateMatrix(self._mat.__abs__())
 
     def __add__(self, other):
-        print('adding', self, other)
         if type(other) == DelegateMatrix:
             other = other._mat
         return DelegateMatrix(self._mat + other)
 
     def __mul__(self, other):
-        print('multiplying', self, other)
         if type(other) == DelegateMatrix:
             other = other._mat
-        return DelegateMatrix(self._mat * other)
+
+        if scipy.sparse.compressed._cs_matrix in type(other).mro():
+            return DelegateMatrix(self._mat * other)
+        elif type(other) == np.ndarray:
+            return DelegateMatrix(scipy.sparse.csr_matrix(self._mat * other))
+        else:
+            raise TypeError('incompatible type %s for multiplication with DelegateMatrix' % type(other))
+
+    def dot(self, other):
+        if type(other) == DelegateMatrix:
+            other = other._mat
+
+        return self._wrap(scipy.sparse.csr_matrix(self._mat.dot(other)))
+
+    def max(self, axis=None, out=None):
+        return self._wrap(self._mat.max(axis, out))
+
+    def min(self, axis=None, out=None):
+        return self._wrap(self._mat.min(axis, out))
+    
+    def sum(self, axis=None, dtype=None, out=None):
+        return self._wrap(self._mat.sum(axis, dtype, out))
+
+    def tocsr(self):
+        return self._mat.tocsr()
  
+    def toarray(self):
+        return self._mat.toarray()
+ 
+    def transpose(self, axes=None):
+        return DelegateMatrix(self._mat.transpose(axes))
+
     @property
     def dtype(self):
         return self._mat.dtype
@@ -52,12 +90,12 @@ class DelegateMatrix:
         return self._mat.ndim
     
     @property
-    def T(self):
-        return DelegateMatrix(self._mat.T)
- 
-    @property
     def shape(self):
         return self._mat.shape
+
+    @property
+    def T(self):
+        return self.transpose() 
 
 
 import scipy.sparse.linalg

@@ -222,6 +222,12 @@ def reduction_matrix(mapping, canonical_order=False):
     return sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int)
 
 
+def reduction_matrix_hdmm(mapping, canonical_order=False):
+    from ektelo.math import DelegateMatrix
+
+    return DelegateMatrix(reduction_matrix(mapping, canonical_order))
+
+
 def expansion_matrix(mapping, canonical_order=False):
     """ Returns an n x m matrix E where n is the dimension of 
         the original data and m is the dimension of the reduced data.
@@ -248,6 +254,12 @@ def expansion_matrix(mapping, canonical_order=False):
     return R.T * scale
 
 
+def expansion_matrix_hdmm(mapping, canonical_order=False):
+    from ektelo.math import DelegateMatrix
+
+    return DelegateMatrix(expansion_matrix(mapping, canonical_order))
+
+
 def projection_matrix(mapping, idx):
     """ Returns m x n matrix P where n is the dimension of the 
         original data and m is the number of occurence of idx
@@ -271,6 +283,11 @@ def projection_matrix(mapping, idx):
 
     return P
 
+
+def projection_matrix_hdmm(mapping, idx):
+    from ektelo.math import DelegateMatrix
+
+    return DelegateMatrix(projection_matrix(mapping, idx))
 
 def combine(p1, p2):
     """ Returns p3, an (n+m) dimensional array of integers such that
