@@ -30,7 +30,7 @@ class Workload(Marshallable):
     def compile(self):
         return self
 
-    def get_matrix(self, matrix_format = 'delegate_matrix'):
+    def get_matrix(self, matrix_format = 'sparse'):
         """
         Produces the matrix represenation of this workload on the flatten domain.
         Note that W.evaluate(X) = W.get_matrix().dot(X.flatten()) where X is a ndarray 

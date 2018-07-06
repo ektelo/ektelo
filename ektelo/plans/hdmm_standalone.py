@@ -116,7 +116,7 @@ class GreedyH(Base):
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        M = selection.GreedyH(x.shape, W.get_matrix()).select()
+        M = selection.GreedyH(x.shape, W.get_matrix('delegate_matrix')).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -188,7 +188,7 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 100)
 
         M_history = np.empty((0, domain_size))
@@ -196,7 +196,7 @@ class Mwem(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW
-            worst_approx = pselection.WorstApprox(W.get_matrix(),
+            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
                                                   W_partial,
                                                   x_hat,
                                                   eps_round * self.ratio,
@@ -284,12 +284,12 @@ class Dawa(Base):
             domain_reducer = transformation.ReduceByPartition(hilbert_mapping)
 
             x = domain_reducer.transform(x)
-            W = W.get_matrix() * support.expansion_matrix_hdmm(hilbert_mapping)
+            W = W.get_matrix('delegate_matrix') * support.expansion_matrix_hdmm(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
         elif len(self.domain_shape) == 1:
-            W = W.get_matrix()
+            W = W.get_matrix('delegate_matrix')
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -449,7 +449,7 @@ class DawaStriped(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix_hdmm(striped_mapping, i)
-            W_i = W.get_matrix() * P_i.T
+            W_i = W.get_matrix('delegate_matrix') * P_i.T
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x_i, prng)
@@ -523,7 +523,7 @@ class MwemVariantB(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
         mult_weight = inference.MultiplicativeWeights()
 
         measured_queries = []
@@ -531,7 +531,7 @@ class MwemVariantB(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(W.get_matrix(),
+            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -558,14 +558,14 @@ class MwemVariantC(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            worst_approx = pselection.WorstApprox(W.get_matrix(), 
+            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'), 
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -590,7 +590,7 @@ class MwemVariantD(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
@@ -598,7 +598,7 @@ class MwemVariantD(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(W.get_matrix(),
+            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
