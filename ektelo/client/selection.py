@@ -8,6 +8,7 @@ from scipy import sparse
 from scipy.linalg import block_diag
 import itertools
 import math
+import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
@@ -29,7 +30,7 @@ def flatten_measurements(m, dsize, sparse_flag = 1):
             M = sparse.csr_matrix(M)
         all_measurements.append(M)
     if sparse_flag == 1:
-        s = sparse.vstack(all_measurements, format = 'csr')
+        s = ektelo.math.vstack(all_measurements, format = 'csr')
     else:
         s = np.array(all_measurements)
 
@@ -125,7 +126,7 @@ def buildHierarchical_sparse(n, b):
     if n <= b:
         a = np.ones(n)
         b = sparse.identity(n, format='csr')
-        return sparse.vstack([a, b])
+        return ektelo.math.vstack([a, b])
 
     # n = mb + r where r < b
     # n = (m+1) r + m (b-r)
@@ -162,7 +163,7 @@ def buildHierarchical_sparse(n, b):
         right = sparse.csr_matrix((rows, n-end))
         res.append(hstack(left, hier0, right))
 
-    return sparse.vstack(res, format='csr')
+    return ektelo.math.vstack(res, format='csr')
 
 
 def find_best_branching(N):
@@ -623,7 +624,7 @@ class Wavelet(SelectionOperator):
         I2 = sparse.identity(m, format='csr')
         A = sparse.kron(H2, [1,1])
         B = sparse.kron(I2, [1,-1])
-        return sparse.vstack([A,B])
+        return ektelo.math.vstack([A,B])
 
     @staticmethod
     def remove_duplicates(a):
@@ -699,6 +700,6 @@ class AddEquiWidthIntervals(SelectionOperator):
         self.grid_size = min(2 ** log_width, self.M_hat.shape[1])
 
     def select(self):
-        return sparse.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        return ektelo.math.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
 
 

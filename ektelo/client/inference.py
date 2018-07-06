@@ -4,6 +4,7 @@ import math
 from scipy import linalg, optimize
 from scipy.sparse.linalg import lsmr, lsqr
 from scipy import sparse
+import ektelo
 from ektelo import util
 from ektelo.operators import InferenceOperator
 
@@ -14,7 +15,7 @@ def get_A(M, noise_scales):
 
     """
     sf = (util.old_div(1.0, np.array(noise_scales)))    # reciprocal of each noise scale
-    D = sparse.spdiags(sf, 0, sf.size, sf.size)
+    D = ektelo.math.diag_like(M, sf, 0, sf.size, sf.size)
     return D * M  # scale rows
 
 
@@ -123,12 +124,15 @@ class ScalableInferenceOperator(InferenceOperator):
             assert type(Ms) == list and type(ys) == list
             assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
         
-            M = np.empty((0, np.product(Ms[0].shape[1])), int)
+            M = None
             y = []
             noise_scales = []
 
             for i in range(len(scale_factors)):
-                M = sparse.vstack((M, Ms[i]))
+                if M is None:
+                    M = Ms[i]
+                else:
+                    M = ektelo.math.vstack((M, Ms[i]))
                 y = np.concatenate((y, ys[i]))
                 noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(ys[i])))
 
@@ -272,13 +276,16 @@ class MultiplicativeWeights(InferenceOperator):
             assert type(M) == list and type(ys) == list
             assert len(Ms) == len(ys) and len(ys) == len(scale_factors)
         
-            M = np.empty((0, np.product(self.cps_domain)), int)
+            M = None
             y = []
             noise_scales = []
 
             for i in range(len(scale_factors)):
-                M = sparse.vstack((M, M_i))
-                y = np.concatenate((y, y_i))
+                if M is None:
+                    M = M_i
+                else:
+                    M = math.vstack((M, Ms[i]))
+                y = np.concatenate((y, ys[i]))
                 noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(y_i)))
 
         return M, y, noise_scales

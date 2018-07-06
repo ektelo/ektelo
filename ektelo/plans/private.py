@@ -2,6 +2,7 @@ import numpy as np
 from scipy import sparse
 from ektelo import support
 from ektelo import util
+from ektelo import math
 from ektelo.plans.common import Base
 from ektelo.wrapper import *
 
@@ -176,7 +177,7 @@ class Mwem(Base):
 
             y = x.laplace(M, eps_round* (1-self.ratio))
 
-            M_history = sparse.vstack([M_history, M])
+            M_history = math.vstack([M_history, M])
             y_history.extend(y)
 
             if self.use_history:

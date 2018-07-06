@@ -3,6 +3,7 @@ import numpy as np
 import math
 from functools import reduce
 from scipy import sparse
+from ektelo import math
 from ektelo.operators import SelectionOperator
 from ektelo.algorithm.privBayes import privBayesSelect
 
@@ -160,7 +161,7 @@ class PrivBayesSelect(SelectionOperator):
                 else:
                     print('bug here')
             M.append(reduce(sparse.kron, Q))
-        return sparse.vstack(M)
+        return math.vstack(M)
 
     @staticmethod
     def get_config_str(relation):

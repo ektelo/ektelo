@@ -5,10 +5,28 @@ import scipy.sparse.linalg
 import scipy.sparse.linalg.interface
 from scipy.sparse import spmatrix
 
-def vstack(dmatrices, format=None, dtype=None):
-    blocks = [dmat.tocsr() for dmat in dmatrices]
 
-    return DelegateMatrix(scipy.sparse.vstack(blocks, format, dtype))
+def vstack(dmatrices, format=None, dtype=None):
+    types = {type(mat) for mat in dmatrices}
+
+    if len(types) == 1 and types.copy().pop() == DelegateMatrix:
+        blocks = [dmat.tocsr() for dmat in dmatrices]
+
+        return DelegateMatrix(scipy.sparse.vstack(blocks, format, dtype))
+    elif DelegateMatrix not in types:
+        return scipy.sparse.vstack(dmatrices)
+    else:
+        raise TypeError('cannot vstack DelegateMatrix with other type')
+
+
+def diag_like(mat, data, diags, m, n, format=None):
+	diag = scipy.sparse.spdiags(data, diags, m, n, format)
+
+	if type(mat) == DelegateMatrix:
+		return DelegateMatrix(diag)
+	else:
+		return diag
+
 
 class DelegateMatrix(scipy.sparse.linalg.LinearOperator):
     # import scipy.sparse.linalg; import scipy.sparse.linalg.interface; import numpy as np; from scipy import sparse; from ektelo.math import DelegateMatrix; s = sparse.csr_matrix((3, 3), dtype=np.int8); s[0,0] = 3; s[1,1] = 1; s[2,2] = 2; b = np.array([1,1,1]); m = DelegateMatrix(s)
@@ -77,6 +95,9 @@ class DelegateMatrix(scipy.sparse.linalg.LinearOperator):
 
     def matvec( self, x ):
         return self._mat * x
+
+    def max(self, axis=None, out=None):
+        return self._wrap(self._mat.max(axis, out))
 
     def sum(self, axis=None, dtype=None, out=None):
         return self._wrap(self._mat.sum(axis, dtype, out))

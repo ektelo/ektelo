@@ -390,7 +390,7 @@ class AGrid(Base):
         y  = measurement.Laplace(M, self.alpha*eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
-        Ms.append(M)
+        Ms.append(math.DelegateMatrix(M))
         ys.append(y)
 
         # Prepare parition object for later SplitByParition.
