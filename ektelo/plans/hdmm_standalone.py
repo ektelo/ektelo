@@ -196,7 +196,7 @@ class Mwem(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+            worst_approx = pselection.WorstApprox(W.get_matrix(),
                                                   W_partial,
                                                   x_hat,
                                                   eps_round * self.ratio,
@@ -531,7 +531,7 @@ class MwemVariantB(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+            worst_approx = pselection.WorstApprox(W.get_matrix(),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -565,7 +565,7 @@ class MwemVariantC(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()), 
+            worst_approx = pselection.WorstApprox(W.get_matrix(), 
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -598,7 +598,7 @@ class MwemVariantD(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+            worst_approx = pselection.WorstApprox(W.get_matrix(),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)

@@ -28,6 +28,13 @@ def diag_like(mat, data, diags, m, n, format=None):
 		return diag
 
 
+def sparse_like(mat):
+	if type(mat) == DelegateMatrix:
+		return DelegateMatrix(scipy.sparse.csr_matrix(mat._mat.shape))
+	else:
+		return scipy.sparse.csr_matrix(mat.shape)
+
+
 class DelegateMatrix(scipy.sparse.linalg.LinearOperator):
     # import scipy.sparse.linalg; import scipy.sparse.linalg.interface; import numpy as np; from scipy import sparse; from ektelo.math import DelegateMatrix; s = sparse.csr_matrix((3, 3), dtype=np.int8); s[0,0] = 3; s[1,1] = 1; s[2,2] = 2; b = np.array([1,1,1]); m = DelegateMatrix(s)
     #
