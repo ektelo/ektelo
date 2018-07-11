@@ -60,6 +60,9 @@ class Workload(Marshallable):
         elif matrix_format == 'delegate_matrix':
             from ektelo.math import DelegateMatrix
             self._matrix['delegate_matrix'] = DelegateMatrix(self.compute_matrix_sparse())
+        elif matrix_format == 'ektelo_matrix':
+            from ektelo.matrix import EkteloMatrix
+            self._matrix['ektelo_matrix'] = EkteloMatrix(self.compute_matrix_sparse())
 
         return self._matrix[matrix_format]
 

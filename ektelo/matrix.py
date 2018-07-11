@@ -4,8 +4,8 @@ from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
 
 class EkteloMatrix(LinearOperator):
     # must implement: matvec, transpose
-    # can  implement: gram, sensitivity, sum, dense_matrix, spares_matrix, 
-                        __abs__, __lstsqr__
+    # can  implement: gram, sensitivity, sum, dense_matrix, spares_matrix, __abs__, __lstsqr__
+
     def __init__(self, matrix):
         # matrix may be one of:
         #  1) 2D numpy array
@@ -15,6 +15,7 @@ class EkteloMatrix(LinearOperator):
         self.matrix = matrix
         self.dtype = matrix.dtype
         self.shape = matrix.shape
+		self.ndim = matrix.ndim # GDB: this seems to be necessary for "*"
     
     def transpose(self):
         return EkteloMatrix(self.matrix.T)
@@ -22,27 +23,56 @@ class EkteloMatrix(LinearOperator):
     def matmat(self, u):
         return self.matrix @ u
     
+    # GDB: this is needed for dot
+    def matvec( self, x ):
+        return self.matrix * x
+
+    def max(self, axis=None, out=None):
+        return self._wrap(self.matrix.max(axis, out))
+
     def gram(self):
         return EkteloMatrix(self.matrix.T @ self.matrix)
    
     def sensitivity(self):
         return np.max(np.abs(self).sum(axis=1))
  
-    def sum(self, axis=None):
+    def sum(self, axis=None, dtype=None, out=None):
+        # GDB: I dropped my pass-through implementation in here because
+        # there were problem with your implementations (see below).
+        return self._wrap(self.matrix.sum(axis, dtype, out))  
+
         if axis == 0:
-            return self * np.ones(self.shape[1])
-        ans = np.ones(self.shape[0]) * self
+            return self * np.ones(self.shape[1]) # GDB: this is returning None
+        ans = np.ones(self.shape[0]) * self  # GDB: this won't work because np.array does not 
+                                             # know how to multiply with EkteloMatrix
         return ans if axis == 1 else np.sum(ans)
     
+    def toarray(self):
+        return self.matrix.toarray()
+
     def adjoint(self):
         return self.transpose()
 
     def __mul__(self, other):
         # implement carefully -- what to do if backing matrix types differ?
-        pass
+		# GDB: I had to bring over my implementation because there are places
+		# in the plans where we use the "*" operator.
+        if type(other) == EkteloMatrix:
+            other = other.matrix
+
+        if sparse.compressed._cs_matrix in type(other).mro():
+            return EkteloMatrix(self.matrix * other)
+        elif type(other) == np.ndarray:
+            return self.matrix * other
+        else:
+            raise TypeError('incompatible type %s for multiplication with EkteloMatrix' % type(other))
     
+    # GDB: I had to remove this; the fact that it does not return
+    # a numpy array causes problems with np.abs
+    """
     def __array__(self):
         return self.dense_matrix()
+    """
 
     def dense_matrix(self):
         return self * np.eye(self.shape[0])
@@ -60,8 +90,22 @@ class EkteloMatrix(LinearOperator):
         # works for subclasses too
         return lsqr(self, v)[0]
 
+    # GDB: I had to add this because numpy with throw on occasion
+    # without it. Actually the docs for LinearOperator do specify 
+    # that either this or _matmat must be implemented. 
+    def _matvec(self, b):
+        raise NotImplementedError( "_matvec" )
+
+    def _wrap(self, result):
+        if np.isscalar(result):
+            return result
+        else:
+            return EkteloMatrix(result)
+
 def Identity(EkteloMatrix):
     def __init__(self, n):
+		# GDB: this and other subclasses probably need to implement
+		# things like shape, dtype, ndim
         self.n = n
         self.shape = (n,n)
    
@@ -117,6 +161,7 @@ class Sum(EkteloMatrix):
 
 class VStack(EkteloMatrix):
     def __init__(self, matrices):
+		# GDB: this needs to implement ndim as a member in order to support "*"
         # all matrices must have same number of columns
         self.matrices = matrices
         m = sum(Q.shape[0] for Q in matrices)
@@ -198,7 +243,6 @@ def Kronecker(EkteloMatrix):
         pass
 
 if __name__ == '__main__':
-    pas
-s
+    pass
     #A = EkteloMatrix(np.eye(5))
     #print(np.eye(5).dtype)

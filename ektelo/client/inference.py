@@ -1,6 +1,7 @@
 from __future__ import division
 import numpy as np
 import math
+from ektelo import matrix
 from scipy import linalg, optimize
 from scipy.sparse.linalg import lsmr, lsqr
 from scipy import sparse
@@ -132,7 +133,7 @@ class ScalableInferenceOperator(InferenceOperator):
                 if M is None:
                     M = Ms[i]
                 else:
-                    M = ektelo.math.vstack((M, Ms[i]))
+                    M = matrix.VStack((M, Ms[i]))
                 y = np.concatenate((y, ys[i]))
                 noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(ys[i])))
 
@@ -284,7 +285,7 @@ class MultiplicativeWeights(InferenceOperator):
                 if M is None:
                     M = M_i
                 else:
-                    M = math.vstack((M, Ms[i]))
+                    M = matrix.VStack((M, Ms[i]))
                 y = np.concatenate((y, ys[i]))
                 noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(y_i)))
 

@@ -223,9 +223,9 @@ def reduction_matrix(mapping, canonical_order=False):
 
 
 def reduction_matrix_hdmm(mapping, canonical_order=False):
-    from ektelo.math import DelegateMatrix
+    from ektelo.matrix import EkteloMatrix
 
-    return DelegateMatrix(reduction_matrix(mapping, canonical_order))
+    return EkteloMatrix(reduction_matrix(mapping, canonical_order))
 
 
 def expansion_matrix(mapping, canonical_order=False):
@@ -255,9 +255,9 @@ def expansion_matrix(mapping, canonical_order=False):
 
 
 def expansion_matrix_hdmm(mapping, canonical_order=False):
-    from ektelo.math import DelegateMatrix
+    from ektelo.matrix import EkteloMatrix
 
-    return DelegateMatrix(expansion_matrix(mapping, canonical_order))
+    return EkteloMatrix(expansion_matrix(mapping, canonical_order))
 
 
 def projection_matrix(mapping, idx):
@@ -285,9 +285,9 @@ def projection_matrix(mapping, idx):
 
 
 def projection_matrix_hdmm(mapping, idx):
-    from ektelo.math import DelegateMatrix
+    from ektelo.matrix import EkteloMatrix
 
-    return DelegateMatrix(projection_matrix(mapping, idx))
+    return EkteloMatrix(projection_matrix(mapping, idx))
 
 def combine(p1, p2):
     """ Returns p3, an (n+m) dimensional array of integers such that

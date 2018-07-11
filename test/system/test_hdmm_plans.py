@@ -30,21 +30,21 @@ class TestHdmmPlans(unittest.TestCase):
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_privelet(self):
         x_hat = standalone.Privelet().Run(self.W_cps,
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_h2(self):
         x_hat = standalone.H2().Run(self.W_cps,
                                     self.x_cps,
                                     self.eps,
                                     self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_hb(self):
         domain_shape = (len(self.x_cps),)
@@ -52,28 +52,28 @@ class TestHdmmPlans(unittest.TestCase):
                                                 self.x_cps,
                                                 self.eps,
                                                 self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_hb_2D(self):
         x_hat = standalone.HB(self.stroke_domain).Run(self.W_stroke,
                                                       self.x_stroke,
                                                       self.eps,
                                                       self.seed)
-        self.W_stroke.get_matrix('delegate_matrix') * x_hat
+        self.W_stroke.get_matrix('ektelo_matrix') * x_hat
 
     def test_greedy_h(self):
         x_hat = standalone.GreedyH().Run(self.W_cps,
                                          self.x_cps,
                                          self.eps,
                                          self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_uniform(self):
         x_hat = standalone.Uniform().Run(self.W_cps,
                                          self.x_cps,
                                          self.eps,
                                          self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_privBayesLS(self):
         theta = 1
@@ -81,7 +81,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                                    self.relation_cps,
                                                                    self.eps,
                                                                    self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_mwem(self):
@@ -98,7 +98,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                  self.x_cps,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_mwem_2D(self):
@@ -114,7 +114,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                  self.x_stroke,
                                                  self.eps,
                                                  self.seed)
-        self.W_stroke.get_matrix('delegate_matrix') * x_hat
+        self.W_stroke.get_matrix('ektelo_matrix') * x_hat
 
     #fails
     def test_ahp(self):
@@ -124,7 +124,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                self.x_cps,
                                                self.eps,
                                                self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat.T
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat.T
 
     def test_dawa(self):
         ratio = 0.25
@@ -134,7 +134,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                                  self.x_cps,
                                                                  self.eps,
                                                                  self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat.T
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat.T
 
     def test_dawa_2D(self):
         ratio = 0.25
@@ -143,14 +143,14 @@ class TestHdmmPlans(unittest.TestCase):
                                                                        self.x_stroke,
                                                                        self.eps,
                                                                        self.seed)
-        self.W_stroke.get_matrix('delegate_matrix') * x_hat
+        self.W_stroke.get_matrix('ektelo_matrix') * x_hat
 
     def test_quad_tree(self):
         x_hat = standalone.QuadTree().Run(self.W_cps,
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     def test_ugrid(self):
         data_scale = 1e5
@@ -159,7 +159,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                  x,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_agrid(self):
@@ -169,7 +169,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                  x,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_dawa_striped(self):
@@ -180,7 +180,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                                                        self.x_cps,
                                                                                        self.eps,
                                                                                        self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_striped_HB_slow(self):
@@ -189,7 +189,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                                       self.x_cps,
                                                                       self.eps,
                                                                       self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_mwem_variant_b(self):
@@ -199,7 +199,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_mwem_variant_c(self):
@@ -209,7 +209,7 @@ class TestHdmmPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat
 
     # fails
     def test_mwem_variant_d(self):
@@ -219,4 +219,4 @@ class TestHdmmPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix('delegate_matrix') * x_hat
+        self.W_cps.get_matrix('ektelo_matrix') * x_hat

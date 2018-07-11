@@ -4,7 +4,7 @@ from ektelo.client import inference
 from ektelo.client import selection
 from ektelo.client import mapper
 from ektelo.client.measurement import laplace_scale_factor
-from ektelo import math
+from ektelo import matrix
 from ektelo.plans.common import Base
 from ektelo.private import measurement
 from ektelo.private import meta
@@ -116,7 +116,7 @@ class GreedyH(Base):
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        M = selection.GreedyH(x.shape, W.get_matrix('delegate_matrix')).select()
+        M = selection.GreedyH(x.shape, W.get_matrix('ektelo_matrix')).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -188,7 +188,7 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('ektelo_matrix').shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 100)
 
         M_history = np.empty((0, domain_size))
@@ -196,7 +196,7 @@ class Mwem(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW
-            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
+            worst_approx = pselection.WorstApprox(W.get_matrix('ektelo_matrix'),
                                                   W_partial,
                                                   x_hat,
                                                   eps_round * self.ratio,
@@ -284,12 +284,12 @@ class Dawa(Base):
             domain_reducer = transformation.ReduceByPartition(hilbert_mapping)
 
             x = domain_reducer.transform(x)
-            W = W.get_matrix('delegate_matrix') * support.expansion_matrix_hdmm(hilbert_mapping)
+            W = W.get_matrix('ektelo_matrix') * support.expansion_matrix_hdmm(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
         elif len(self.domain_shape) == 1:
-            W = W.get_matrix('delegate_matrix')
+            W = W.get_matrix('ektelo_matrix')
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -390,7 +390,7 @@ class AGrid(Base):
         y  = measurement.Laplace(M, self.alpha*eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
-        Ms.append(math.DelegateMatrix(M))
+        Ms.append(matrix.EkteloMatrix(M))
         ys.append(y)
 
         # Prepare parition object for later SplitByParition.
@@ -411,7 +411,7 @@ class AGrid(Base):
 
             sub_domain_shape = sub_domains[i]
 
-            M_i = math.DelegateMatrix(selection.AdaptiveGrid(sub_domain_shape, 
+            M_i = matrix.EkteloMatrix(selection.AdaptiveGrid(sub_domain_shape, 
 										                     x_hat_i, 
 										                     (1-self.alpha)*eps, 
 										                     c2=self.c2).select())
@@ -449,7 +449,7 @@ class DawaStriped(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix_hdmm(striped_mapping, i)
-            W_i = W.get_matrix('delegate_matrix') * P_i.T
+            W_i = W.get_matrix('ektelo_matrix') * P_i.T
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x_i, prng)
@@ -462,9 +462,9 @@ class DawaStriped(Base):
                 M_bar, eps * (1 - self.ratio)).measure(x_bar, prng)
 
             noise_scale_factor = laplace_scale_factor(
-                math.DelegateMatrix(M_bar), eps * (1 - self.ratio))
+                matrix.EkteloMatrix(M_bar), eps * (1 - self.ratio))
 
-            M_i = (math.DelegateMatrix(M_bar) * support.reduction_matrix_hdmm(mapping)) * P_i
+            M_i = (matrix.EkteloMatrix(M_bar) * support.reduction_matrix_hdmm(mapping)) * P_i
 
             Ms.append(M_i)
             ys.append(y_i)
@@ -501,7 +501,7 @@ class StripedHB(Base):
 
             noise_scale_factor = laplace_scale_factor(M_bar, eps)
 
-            M_i = math.DelegateMatrix(M_bar) * P_i
+            M_i = matrix.EkteloMatrix(M_bar) * P_i
 
             Ms.append(M_i)
             ys.append(y_i)
@@ -523,7 +523,7 @@ class MwemVariantB(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('ektelo_matrix').shape)
         mult_weight = inference.MultiplicativeWeights()
 
         measured_queries = []
@@ -531,7 +531,7 @@ class MwemVariantB(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
+            worst_approx = pselection.WorstApprox(W.get_matrix('ektelo_matrix'),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -558,14 +558,14 @@ class MwemVariantC(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('ektelo_matrix').shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'), 
+            worst_approx = pselection.WorstApprox(W.get_matrix('ektelo_matrix'), 
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -590,7 +590,7 @@ class MwemVariantD(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix('delegate_matrix').shape)
+        W_partial = sparse.csr_matrix(W.get_matrix('ektelo_matrix').shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
@@ -598,7 +598,7 @@ class MwemVariantD(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(W.get_matrix('delegate_matrix'),
+            worst_approx = pselection.WorstApprox(W.get_matrix('ektelo_matrix'),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
