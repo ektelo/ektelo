@@ -188,7 +188,7 @@ class Mwem(Base):
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
         W_partial = sparse.csr_matrix(W.get_matrix().shape)
-        mult_weight = inference.MultiplicativeWeights(updateRounds = 100)
+        mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
 
         M_history = np.empty((0, domain_size))
         y_history = []
@@ -437,6 +437,7 @@ class DawaStriped(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        x = x.flatten()            
         prng = np.random.RandomState(seed)
 
         striped_mapping = mapper.Striped(self.domain, self.stripe_dim).mapping()
@@ -445,8 +446,9 @@ class DawaStriped(Base):
         Ms = []
         ys = []
         scale_factors = []
-        for i in sorted(set(striped_mapping)):
-            x_i = x_sub_list[i]
+        group_idx = sorted(set(striped_mapping))
+        for i in group_idx: 
+            x_i = x_sub_list[group_idx.index(i)]
             P_i = support.projection_matrix(striped_mapping, i)
             W_i = W.get_matrix() * P_i.T
 
@@ -483,6 +485,7 @@ class StripedHB(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        x = x.flatten()            
         prng = np.random.RandomState(seed)
 
         striped_mapping = mapper.Striped(self.domain, self.stripe_dim).mapping()
@@ -491,8 +494,10 @@ class StripedHB(Base):
         Ms = []
         ys = []
         scale_factors = []
-        for i in sorted(set(striped_mapping)):
-            x_i = x_sub_list[i]
+        group_idx = sorted(set(striped_mapping))
+        for i in group_idx:
+
+            x_i = x_sub_list[group_idx.index(i)]
             P_i = support.projection_matrix(striped_mapping, i)
 
             M_bar = selection.HB(x_i.shape).select()
@@ -511,24 +516,33 @@ class StripedHB(Base):
         return x_hat
 
 
+
+
 class MwemVariantB(Base):
 
-    def __init__(self, ratio, rounds):
+    def __init__(self, ratio, rounds, data_scale, domain_shape, use_history):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.rounds = rounds
+        self.data_scale = data_scale
+        self.domain_shape = domain_shape
+        self.use_history = use_history
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        x = x.flatten()
         prng = np.random.RandomState(seed)
-        x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
-        mult_weight = inference.MultiplicativeWeights()
+        domain_size = np.prod(self.domain_shape)
+        # Start with a unifrom estimation of x
+        x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        measured_queries = []
+        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
+
+        M_history = np.empty((0, domain_size))
+        y_history = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
-
             # SW + SH2
             worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
                                                   W_partial, 
@@ -538,25 +552,38 @@ class MwemVariantB(Base):
             W_next = worst_approx.select(x, prng)
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
-            W_partial += W_next
-            laplace = measurement.Laplace(M, eps * (1-self.ratio) )
+            # LM 
+            laplace = measurement.Laplace(M, eps_round * (1-self.ratio))
             y = laplace.measure(x, prng)
-            x_hat = mult_weight.infer(M, y, x_hat)
+
+            M_history = sparse.vstack([M_history, M])
+            y_history.extend(y)
+
+            # MW
+            if self.use_history:
+                x_hat = mult_weight.infer(M_history, y_history, x_hat)
+            else:
+                x_hat = mult_weight.infer(M, y, x_hat)
 
         return x_hat
 
 
 class MwemVariantC(Base):
 
-    def __init__(self, ratio, rounds):
+    def __init__(self, ratio, rounds, data_scale, domain_shape, total_noise_scale):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.rounds = rounds
+        self.data_scale = data_scale
+        self.domain_shape = domain_shape
+        self.total_noise_scale = total_noise_scale  
         super().__init__()
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        x_hat = prng.rand(*x.shape)
+        domain_size = np.prod(self.domain_shape)
+        # Start with a unifrom estimation of x
+        x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         W_partial = sparse.csr_matrix(W.get_matrix().shape)
         nnls = inference.NonNegativeLeastSquares()
 
@@ -573,22 +600,32 @@ class MwemVariantC(Base):
             W_partial += W_next
             laplace = measurement.Laplace(M, eps * (1-self.ratio))
             y = laplace.measure(x, prng)
-            x_hat = nnls.infer(M, y)
+            if self.total_noise_scale != 0:
+                total_query = sparse.csr_matrix([1]*domain_size)
+                noise_scale = laplace_scale_factor(M, eps * (1-self.ratio))
+                x_hat = nnls.infer([total_query, M], [[self.data_scale], y], [self.total_noise_scale, noise_scale])
+            else:
+                x_hat = nnls.infer(M, y)
 
         return x_hat
 
 
 class MwemVariantD(Base):
 
-    def __init__(self, ratio, rounds):
+    def __init__(self, ratio, rounds, data_scale, domain_shape, total_noise_scale):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.rounds = rounds
+        self.data_scale = data_scale
+        self.domain_shape = domain_shape
+        self.total_noise_scale = total_noise_scale  
         super().__init__()
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        x_hat = prng.rand(*x.shape)
+        domain_size = np.prod(self.domain_shape)
+        # Start with a unifrom estimation of x
+        x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         W_partial = sparse.csr_matrix(W.get_matrix().shape)
         nnls = inference.NonNegativeLeastSquares()
 
@@ -606,8 +643,17 @@ class MwemVariantD(Base):
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
             W_partial += W_next
-            laplace = measurement.Laplace(M, eps * (1-self.ratio) )
+
+            laplace = measurement.Laplace(M, eps * (1-self.ratio))
             y = laplace.measure(x, prng)
-            x_hat = nnls.infer(M, y)
+            if self.total_noise_scale != 0:
+                total_query = sparse.csr_matrix([1]*domain_size)
+                noise_scale = laplace_scale_factor(M, eps * (1-self.ratio))
+                x_hat = nnls.infer([total_query, M], [[self.data_scale], y], [self.total_noise_scale, noise_scale])
+            else:
+                x_hat = nnls.infer(M, y)
 
         return x_hat
+
+
+            
