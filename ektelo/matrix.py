@@ -2,6 +2,15 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
 
+
+def diag_like(mat, data, diags, m, n, format=None):
+    diag = sparse.spdiags(data, diags, m, n, format)
+
+    if EkteloMatrix in type(mat).mro():
+        return EkteloMatrix(diag)
+    else:
+        return diag
+
 class EkteloMatrix(LinearOperator):
     # must implement: matvec, transpose
     # can  implement: gram, sensitivity, sum, dense_matrix, spares_matrix, __abs__, __lstsqr__
@@ -15,7 +24,7 @@ class EkteloMatrix(LinearOperator):
         self.matrix = matrix
         self.dtype = matrix.dtype
         self.shape = matrix.shape
-		self.ndim = matrix.ndim # GDB: this seems to be necessary for "*"
+        self.ndim = matrix.ndim # GDB: this seems to be necessary for "*"
     
     def transpose(self):
         return EkteloMatrix(self.matrix.T)
@@ -28,7 +37,7 @@ class EkteloMatrix(LinearOperator):
         return self.matrix * x
 
     def max(self, axis=None, out=None):
-        return self._wrap(self.matrix.max(axis, out))
+        return self.matrix.max(axis, out)
 
     def gram(self):
         return EkteloMatrix(self.matrix.T @ self.matrix)
@@ -39,7 +48,7 @@ class EkteloMatrix(LinearOperator):
     def sum(self, axis=None, dtype=None, out=None):
         # GDB: I dropped my pass-through implementation in here because
         # there were problem with your implementations (see below).
-        return self._wrap(self.matrix.sum(axis, dtype, out))  
+        return self.matrix.sum(axis, dtype, out)
 
         if axis == 0:
             return self * np.ones(self.shape[1]) # GDB: this is returning None
@@ -55,8 +64,8 @@ class EkteloMatrix(LinearOperator):
 
     def __mul__(self, other):
         # implement carefully -- what to do if backing matrix types differ?
-		# GDB: I had to bring over my implementation because there are places
-		# in the plans where we use the "*" operator.
+        # GDB: I had to bring over my implementation because there are places
+        # in the plans where we use the "*" operator.
         if type(other) == EkteloMatrix:
             other = other.matrix
 
@@ -96,16 +105,10 @@ class EkteloMatrix(LinearOperator):
     def _matvec(self, b):
         raise NotImplementedError( "_matvec" )
 
-    def _wrap(self, result):
-        if np.isscalar(result):
-            return result
-        else:
-            return EkteloMatrix(result)
-
 def Identity(EkteloMatrix):
     def __init__(self, n):
-		# GDB: this and other subclasses probably need to implement
-		# things like shape, dtype, ndim
+        # GDB: this and other subclasses probably need to implement
+        # things like shape, dtype, ndim
         self.n = n
         self.shape = (n,n)
    
@@ -161,7 +164,7 @@ class Sum(EkteloMatrix):
 
 class VStack(EkteloMatrix):
     def __init__(self, matrices):
-		# GDB: this needs to implement ndim as a member in order to support "*"
+        # GDB: this needs to implement ndim as a member in order to support "*"
         # all matrices must have same number of columns
         self.matrices = matrices
         m = sum(Q.shape[0] for Q in matrices)

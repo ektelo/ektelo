@@ -16,7 +16,7 @@ def get_A(M, noise_scales):
 
     """
     sf = (util.old_div(1.0, np.array(noise_scales)))    # reciprocal of each noise scale
-    D = ektelo.math.diag_like(M, sf, 0, sf.size, sf.size)
+    D = matrix.diag_like(M, sf, 0, sf.size, sf.size)
     return D * M  # scale rows
 
 
