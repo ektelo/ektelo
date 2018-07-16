@@ -1,58 +1,81 @@
-from matrix import *
+from matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker
 import collections
+import itertools
+import numpy as np
 
 # workloads
 
-class IdentityTotal(VStack):
-    def __init__(self, n):
-        sub = [Identity(n), Total(n)]
-        VStack.__init__(self, sub)
+def Total(n):
+    return Ones((1,n))
+
+def IdentityTotal(n):
+    return VStack([Identity(n), Total(n)])
 
 class Prefix(EkteloMatrix):
-    def __init__(self, n):
+    def __init__(self, n, dtype=np.float64):
         self.n = n
         self.shape = (n,n)
+        self.dtype = dtype
 
-    def matmat(self, V):
+    def _matmat(self, V):
         return np.cumsum(V, axis=0)
 
-    def transpose(self):
+    def _transpose(self):
         return Suffix(self.n) 
 
-    def dense_matrix(self):
+    @property
+    def matrix(self):
         return np.tril(np.ones((self.n, self.n)))
-
-    def __abs__(self);
+    
+    def __abs__(self):
         return self
 
 class Suffix(EkteloMatrix):
-    def __init__(self, n):
+    def __init__(self, n, dtype=np.float64):
         self.n = n
         self.shape = (n,n)
+        self.dtype = dtype
 
-    def matmat(self, V):
+    def _matmat(self, V):
         return np.cumsum(V[::-1], axis=0)[::-1]
     
-    def transpose(self):
+    def _transpose(self):
         return Prefix(self.n)
     
-    def dense_matrix(self):
+    @property
+    def matrix(self):
         return np.triu(np.ones((self.n, self.n)))
 
     def __abs__(self):
         return self
 
 class AllRange(EkteloMatrix):
-    def __init__(self, n):
+    def __init__(self, n, dtype=np.float64):
+        self.n = n
         self.shape = ((n*(n+1) // 2), n)
+        self.dtype = dtype
+        self._prefix = Prefix(n, dtype)
         
-    def matmat(self):
-        pass
+    def _matmat(self, V):
+        # probably not a good idea to ever call this function
+        # should use gram when possible because this workload is so large
+        # not gonna bother with a super efficient vectorized implementation
+        m = self.shape[0]
+        n = V.shape[1]
+        ans = np.vstack([np.zeros(n), self._prefix.dot(V)])
+        res = np.zeros((m, n))
+        for i, (a, b) in enumerate(itertools.combinations(range(self.n+1), 2)):
+            res[i] = ans[b] - ans[a]
+        return res
+    
+    @property
+    def matrix(self):
+        return self.dot(np.eye(self.n))
 
     def gram(self):
         r = np.arange(self.n) + 1
         X = np.outer(r, r[::-1])
-        reutrn EkteloMatrix(np.minimum(X, X.T))
+        return EkteloMatrix(np.minimum(X, X.T))
 
 class PIdentity(EkteloMatrix):
     def __init__(self, theta):
@@ -94,7 +117,7 @@ def DimKMarginals(domain, dims):
     return Marginals(domain, weights)
 
 def Range2D(n):
-    return Kron([AllRange(n), AllRange(n)])
+    return Kronecker([AllRange(n), AllRange(n)])
 
 def Prefix2D(n):
-    return Kron([Prefix(n), Prefix(n)]) 
+    return Kronecker([Prefix(n), Prefix(n)]) 
