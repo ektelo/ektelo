@@ -17,16 +17,16 @@ def _any_sparse(matrices):
 
 class EkteloMatrix(LinearOperator):
     """
-    An EkteloMatrix is a linear transformation 
+    An EkteloMatrix is a linear transformation that can compute matrix-vector products 
     """
     # must implement: _matmat, _transpose, matrix
     # can  implement: gram, sensitivity, sum, dense_matrix, sparse_matrix, __abs__, __lstsqr__
 
     def __init__(self, matrix):
-        # matrix may be one of:
-        #  1) 2D numpy array
-        #  2) scipy sparse matrix
-        # note: dtype may also vary (e.g., 32 bit or 64 bit float) 
+        """ Instantiate an EkteloMatrix from an explicitly represented backing matrix
+        
+        :param matrix: a 2d numpy array or a scipy sparse matrix
+        """
         self.matrix = matrix
         self.dtype = matrix.dtype
         self.shape = matrix.shape
@@ -35,11 +35,20 @@ class EkteloMatrix(LinearOperator):
         return EkteloMatrix(self.matrix.T)
     
     def _matmat(self, V):
+        """
+        Matrix multiplication of a m x n matrix Q
+        
+        :param V: a n x p numpy array
+        :return Q*V: a m x p numpy aray
+        """
         return self.matrix @ V
 
     def gram(self):
+        """ 
+        Compute the Gram matrix of the given matrix.
+        For a matrix Q, the gram matrix is defined as Q^T Q
+        """
         return self.T @ self # works for subclasses too
-        # EkteloMatrix(self.matrix.T @ self.matrix)
    
     def sensitivity(self):
         # note: this works because np.abs calls self.__abs__
@@ -49,7 +58,10 @@ class EkteloMatrix(LinearOperator):
         # GDB: I dropped my pass-through implementation in here because
         # there were problem with your implementations (see below).
         #return self.matrix.sum(axis, dtype, out)
-
+        
+        # RM: is it worth it to conform to the numpy api and support dtype/out? What does this buy us?
+        
+        # this implementation works for all subclasses too (as long as they define _matmat and _transpose)
         if axis == 0:
             return self.dot(np.ones(self.shape[1]))
         ans = self.T.dot(np.ones(self.shape[0]))  
@@ -64,12 +76,13 @@ class EkteloMatrix(LinearOperator):
         return self._transpose()
 
     def __mul__(self, other):
-        # implement carefully -- what to do if backing matrix types differ?
         # GDB: I had to bring over my implementation because there are places
         # in the plans where we use the "*" operator.
         
         # if other is a numpy array, simply call dot
         # if other is an EkteloMatrix, otherwise perform multiplication
+        if np.isscalar(other):
+            return Weighted(self, other)
         if type(other) == np.ndarray:
             return self.dot(other)
         if isinstance(other, EkteloMatrix):
@@ -81,15 +94,24 @@ class EkteloMatrix(LinearOperator):
             return EkteloMatrix(self.matrix * other)
         else:
             raise TypeError('incompatible type %s for multiplication with EkteloMatrix' % type(other))
+            
+    def __rmul__(self, other):
+        if np.isscalar(other):
+            return Weighted(self, other)
+        return NotImplemented
     
-    # should this return a numpy array or an ektelo matrix with numpy array backing?
     def dense_matrix(self):
+        """
+        return the dense representation of this matrix, as a 2D numpy array
+        """
         if sparse.issparse(self.matrix):
             return self.matrix.toarray()
         return self.matrix
     
-    # should this return a sparse matrix or an ektelo matrix with sparse matrix backing?
     def sparse_matrix(self):
+        """
+        return the sparse representation of this matrix, as a scipy matrix
+        """
         if sparse.issparse(self.matrix):
             return self.matrix
         return sparse.csr_matrix(self.matrix)
@@ -102,14 +124,18 @@ class EkteloMatrix(LinearOperator):
     def __abs__(self):
         return EkteloMatrix(self.matrix.__abs__())
     
-    def __lstsqr__(self, v):
+    # RM: consider deprecating this
+    def __lstsqr__(self, y):
+        """
+        solve a least squares problem with this matrix.
+        For a matrix Q and a vector y, the least square solution is the vector x
+        such that || Qx - y ||_2 is minimized
+        """
         # works for subclasses too
-        return lsqr(self, v)[0]
+        return lsqr(self, y)[0]
 
 class Identity(EkteloMatrix):
     def __init__(self, n, dtype=np.float64):
-        # GDB: this and other subclasses probably need to implement
-        # things like shape, dtype, ndim
         self.n = n
         self.shape = (n,n)
         self.dtype = dtype
@@ -125,6 +151,7 @@ class Identity(EkteloMatrix):
         return sparse.eye(self.n, dtype=self.dtype)
     
     def __mul__(self, other):
+        assert other.shape[0] == self.n, 'dimension mismatch'
         return other
 
     def __abs__(self):  
@@ -134,6 +161,7 @@ class Identity(EkteloMatrix):
         return v
 
 class Ones(EkteloMatrix):
+    """ A m x n matrix of all ones """
     def __init__(self, m, n, dtype=np.float64):
         self.m = m
         self.n = n
@@ -146,12 +174,43 @@ class Ones(EkteloMatrix):
     
     def _transpose(self):
         return Ones(self.n, self.m, self.dtype)
+    
+    def gram(self):
+        return self.m * Ones(self.n, self.n, self.dtype)
         
     @property
     def matrix(self):
         return np.ones(self.shape, dtype=self.dtype)
+    
+    def __abs__(self):
+        return self
+    
+class Weighted(EkteloMatrix):
+    """ Class for multiplication by a constant """
+    def __init__(self, base, weight):
+        self.base = base
+        self.weight = weight
+        self.shape = base.shape
+        self.dtype = base.dtype
+    
+    def _matmat(self, V):
+        return self.weight * self.base.dot(V)
+    
+    def _transpose(self):
+        return Weighted(self.base.T, self.weight)
+    
+    def gram(self):
+        return Weighted(self.base.gram(), self.weight**2)
+    
+    def __abs__(self):
+        return Weighted(self.base.__abs__(), np.abs(self.weight))
+    
+    @property
+    def matrix(self):
+        return self.weight * self.base.matrix
 
 class Sum(EkteloMatrix):
+    """ Class for the Sum of matrices """
     def __init__(self, matrices):
         # all must have same shape
         self.matrices = matrices
@@ -169,28 +228,15 @@ class Sum(EkteloMatrix):
         if _any_sparse(self.matrices):
             return sum(Q.sparse_matrix() for Q in self.matrices)
         return sum(Q.dense_matrix() for Q in self.matrices)
-    
-# For a VStack object Q we can do the following:
-# A * Q where A is a HStack (returns a Sum)
-# Q * A where A is an EkteloMatrix
-# Q * A where A is a HStack (returns a VStack of HStacks)
-# note: A * Q where A is an EkteloMatrix requires either 
-#         (1) converting Q to it's explicit representation or 
-#         (2) splitting A so that it is a HStack object
-        
-# What if A is a Kronecker product that has the right size?
-# should we support these operations, defaulting to the explicit representations when necessary?
-# or should we just fail
 
 class VStack(EkteloMatrix):
     def __init__(self, matrices):
-        # GDB: this needs to implement ndim as a member in order to support "*"
-        # all matrices must have same number of columns
-        self.matrices = matrices
         m = sum(Q.shape[0] for Q in matrices)
         n = matrices[0].shape[1]
+        assert all(Q.shape[1] == n for Q in matrices), 'dimension mismatch'
         self.shape = (m,n)
-        self.dtype = matrices[0].dtype
+        self.matrices = matrices
+        self.dtype = matrices[0].dtype # what if dtypes differ?
     
     def _matmat(self, V):
         return np.vstack([Q.dot(V) for Q in self.matrices])
@@ -224,11 +270,12 @@ class VStack(EkteloMatrix):
 class HStack(EkteloMatrix):
     def __init__(self, matrices):
         # all matrices must have same number of rows
-        self.matrices = matrices
         cols = [Q.shape[1] for Q in matrices]
         m = matrices[0].shape[0]
         n = sum(cols)
+        assert all(Q.shape[0] == m for Q in matrices), 'dimension mismatch'
         self.shape = (m,n)
+        self.matrices = matrices
         self.dtype = matrices[0].dtype
         self.split = np.cumsum(cols)[::-1]
 

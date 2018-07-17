@@ -2,16 +2,32 @@ from matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker
 import collections
 import itertools
 import numpy as np
+from scipy import sparse
 
-# workloads
+def Total(n, dtype=np.float64):
+    """
+    The 1 x n matrix of 1s
+    :param n: the domain size
+    :return: the query matrix
+    """
+    return Ones(1,n,dtype)
 
-def Total(n):
-    return Ones((1,n))
-
-def IdentityTotal(n):
-    return VStack([Identity(n), Total(n)])
+def IdentityTotal(n, weight=1.0, dtype=np.float64):
+    """
+    The matrix [I; w*T] where w is the weight on the total query
+    :param n: the domain size
+    :param weight: the weight on the total query
+    :return: the query matrix
+    """
+    I = Identity(n, dtype)
+    T = Total(n, dtype)
+    w = dtype(weight)
+    return VStack([I, w*T])
 
 class Prefix(EkteloMatrix):
+    """
+    The prefix workload encodes range queries of the form [0,k] for 0 <= k <= n-1
+    """
     def __init__(self, n, dtype=np.float64):
         self.n = n
         self.shape = (n,n)
@@ -25,12 +41,19 @@ class Prefix(EkteloMatrix):
 
     @property
     def matrix(self):
-        return np.tril(np.ones((self.n, self.n)))
+        return np.tril(np.ones((self.n, self.n), self.dtype))
+    
+    def gram(self):
+        y = 1 + np.arange(self.n).astype(self.dtype)[::-1]
+        return EkteloMatrix(np.minimum(y, y[:,None]))
     
     def __abs__(self):
         return self
 
 class Suffix(EkteloMatrix):
+    """
+    The suffix workload encodes range queries of the form [k, n-1] for 0 <= k <= n-1
+    """
     def __init__(self, n, dtype=np.float64):
         self.n = n
         self.shape = (n,n)
@@ -44,13 +67,21 @@ class Suffix(EkteloMatrix):
     
     @property
     def matrix(self):
-        return np.triu(np.ones((self.n, self.n)))
+        return np.triu(np.ones((self.n, self.n), self.dtype))
+    
+    def gram(self):
+        y = 1 + np.arange(self.n).astype(self.dtype)
+        return EkteloMatrix(np.minimum(y, y[:,None]))
 
     def __abs__(self):
         return self
 
 class AllRange(EkteloMatrix):
+    """
+    The AllRange workload encodes range queries of the form [i,j] for 0 <= i <= j <= n-1
+    """
     def __init__(self, n, dtype=np.float64):
+        # note: transpose is not implemented, but it's not really needed anyway
         self.n = n
         self.shape = ((n*(n+1) // 2), n)
         self.dtype = dtype
@@ -76,6 +107,41 @@ class AllRange(EkteloMatrix):
         r = np.arange(self.n) + 1
         X = np.outer(r, r[::-1])
         return EkteloMatrix(np.minimum(X, X.T))
+    
+class Wavelet(EkteloMatrix):
+    def __init__(self, n, dtype=np.float64):
+        # todo: check n = 2^k
+        # for now default to the standard EkteloMatrix operations
+        # in the future implement the fast (linear time) matrix-vector product algorithm
+        self.n = n
+        self.shape = (n,n)
+        self.dtype = dtype
+        
+    def _matmat(self, V):
+        return NotImplemented # todo
+    
+    def _transpose(self):
+        return NotImplemented # todo
+    
+    @property
+    def matrix(self):
+        return _wavelet_sparse(self.n).astype(self.dtype)
+    
+class Hierarchical(EkteloMatrix):
+    def __init__(self, n, branch=2, dtype=np.float64):
+        self.n = n
+        self.branch = branch
+        self.dtype = dtype
+        
+    def _matmat(self, V):
+        return NotImplemented
+    
+    def _transpose(self):
+        return NotImplemented
+    
+    @property
+    def matrix(self):
+        return _hierarchical_sparse(self.n, self.branch)
 
 class PIdentity(EkteloMatrix):
     def __init__(self, theta):
@@ -121,3 +187,35 @@ def Range2D(n):
 
 def Prefix2D(n):
     return Kronecker([Prefix(n), Prefix(n)]) 
+
+def _wavelet_sparse(n):
+    '''
+    Returns a sparse (csr_matrix) wavelet matrix of size n = 2^k
+    '''
+    if n == 1:
+        return sparse.identity(1, format='csr')
+    m, r = divmod(n, 2)
+    assert r == 0, 'n must be power of 2'
+    H2 = Wavelet.wavelet_sparse(m)
+    I2 = sparse.identity(m, format='csr')
+    A = sparse.kron(H2, [1,1])
+    B = sparse.kron(I2, [1,-1])
+    return sparse.vstack([A,B])
+
+def _hierarchical_sparse(n, b):
+    '''
+    Builds a sparsely represented (csr_matrix) hierarchical matrix
+    with n columns and a branching factor of b.  Works even when n
+    is not a power of b
+    '''
+    if n == 0: return sparse.csr_matrix((0,0))
+    if n == 1: return sparse.csr_matrix([1.0])
+
+    m, r = divmod(n, b)
+    hier0 = _hierarchical_sparse(m, b) 
+    hier1 = _hierarchical_sparse(m+1, b) if r>0 else None 
+    total = np.ones((1,n))
+    sub = sparse.block_diag([hier1]*r + [hier0]*(b-r), format='csr')
+    return sparse.vstack([total, sub])
+
+
