@@ -280,17 +280,17 @@ class WorkloadBased(MapperOperator):
         # compressed = numpy.ascontiguousarray(mat).view(numpy.dtype((numpy.void, mat.dtype.itemsize * mat.shape[1])))  
 
         # http://www.ryanhmckenna.com/2017/01/efficiently-remove-duplicate-rows-from.html
-        v = numpy.random.rand(A.shape[0])
+        v = np.random.rand(A.shape[0])
         vA = A.T.dot(v)     
 
         # use numpy.unique
         # returned 'inverse' is the index of the unique value present in each position (this functions as a group id)
-        _u, index, inverse = numpy.unique(vA, return_index=True, return_inverse=True)   
+        _u, index, inverse = np.unique(vA, return_index=True, return_inverse=True)   
 
         if stable:
-            return support.canonical_ordering(_replace(inverse, index), canonical_order=True)
+            return support.canonical_ordering(support._replace(inverse, index))
         else:
-            return support.canonical_ordering( inverse, canonical_order=True)
+            return support.canonical_ordering(inverse)
     
     def mapping(self):
         return WorkloadBased.partition_lossless(self.W)

@@ -60,7 +60,11 @@ def cantor_pairing(a, b):
     A function returning a unique positive integer for every pair (a,b) of positive integers
     """
     return (a+b)*(a+b+1)/2 + b
-
+    
+def _replace(vector, new_values):
+    for i in range(len(vector)):
+        vector[i] = new_values[ vector[i] ]
+    return vector
 
 def get_partition_vec(rank,n,cluster,closeRange=False):
     """ get the partition vector from clusters returned by partition algorithms

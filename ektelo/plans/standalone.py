@@ -1,5 +1,6 @@
 from ektelo import support
 from ektelo import util
+from ektelo import workload
 from ektelo.client import inference
 from ektelo.client import selection
 from ektelo.client import mapper
@@ -22,9 +23,10 @@ class Identity(Base):
         self.workload_based = workload_based
 
     def Run(self, W, x, eps, seed):
-        x = x.flatten()            
+        x = x.flatten()   
         prng = np.random.RandomState(seed)
         if self.workload_based:
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
             mapping = mapper.WorkloadBased(W).mapping() 
             reducer = transformation.ReduceByPartition(mapping)
             x = reducer.transform(x)
@@ -85,9 +87,10 @@ class HB(Base):
     http://dl.acm.org/citation.cfm?id=2556576
     """
 
-    def __init__(self, domain_shape):
+    def __init__(self, domain_shape, workload_based=False):
         self.init_params = util.init_params_from_locals(locals())
         self.domain_shape = domain_shape
+        self.workload_based = workload_based
         super().__init__()
 
         assert len(domain_shape) in [1, 2], "HB only works for 1D and 2D domains"
@@ -95,6 +98,16 @@ class HB(Base):
     def Run(self, W, x, eps, seed):
         x = x.flatten()
         prng = np.random.RandomState(seed)
+        if self.workload_based:
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            mapping = mapper.WorkloadBased(W).mapping() 
+            reducer = transformation.ReduceByPartition(mapping)
+            x = reducer.transform(x)
+            # Reduce workload
+            # W = support.reduce_queries(mapping, W)
+            W = W * support.expansion_matrix(mapping)
+            self.domain_shape = x.shape
+
         M = selection.HB(self.domain_shape).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
@@ -115,7 +128,8 @@ class GreedyH(Base):
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        M = selection.GreedyH(x.shape, W.get_matrix()).select()
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        M = selection.GreedyH(x.shape, W).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -187,7 +201,9 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+        W_partial = sparse.csr_matrix(W.shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
 
         M_history = np.empty((0, domain_size))
@@ -195,7 +211,8 @@ class Mwem(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+
+            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W),
                                                   W_partial,
                                                   x_hat,
                                                   eps_round * self.ratio,
@@ -227,15 +244,25 @@ class Ahp(Base):
     http://epubs.siam.org/doi/abs/10.1137/1.9781611973440.68
     """
 
-    def __init__(self, eta, ratio):
+    def __init__(self, eta, ratio, workload_based=False):
         self.init_params = util.init_params_from_locals(locals())
         self.eta = eta
         self.ratio = ratio
+        self.workload_based = workload_based
         super().__init__()
 
     def Run(self, W, x, eps, seed):
         x = x.flatten()
         prng = np.random.RandomState(seed)
+
+        if self.workload_based:
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            mapping = mapper.WorkloadBased(W).mapping() 
+            reducer = transformation.ReduceByPartition(mapping)
+            x = reducer.transform(x)
+            # Reduce workload
+            # W = support.reduce_queries(mapping, W)
+            W = W * support.expansion_matrix(mapping)
 
         # Orange AHPparition(PA) operator in paper can be expressed
         # as the following sequence of simpler opeartors
@@ -264,11 +291,12 @@ class Dawa(Base):
     http://dl.acm.org/citation.cfm?id=2732271
     """
 
-    def __init__(self, domain_shape, ratio, approx):
+    def __init__(self, domain_shape, ratio, approx, workload_based=False):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.approx = approx
         self.domain_shape = domain_shape
+        self.workload_based = workload_based
         super().__init__()
 
         assert len(domain_shape) in [1, 2], "DAWA only works for 1D and 2D domains"
@@ -277,18 +305,31 @@ class Dawa(Base):
         x = x.flatten()
         prng = np.random.RandomState(seed)
 
+        if self.workload_based:
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            mapping = mapper.WorkloadBased(W).mapping() 
+            reducer = transformation.ReduceByPartition(mapping)
+            x = reducer.transform(x)
+            # Reduce workload
+            # W = support.reduce_queries(mapping, W)
+            W = W * support.expansion_matrix(mapping)
+            self.domain_shape = x.shape
+
+
         if len(self.domain_shape) == 2:
             # apply hilbert transform to convert 2d domain into 1d
             hilbert_mapping = mapper.HilbertTransform(self.domain_shape).mapping()
             domain_reducer = transformation.ReduceByPartition(hilbert_mapping)
 
             x = domain_reducer.transform(x)
-            W = W.get_matrix() * support.expansion_matrix(hilbert_mapping)
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+            W = W * support.expansion_matrix(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
         elif len(self.domain_shape) == 1:
-            W = W.get_matrix()
+            W = W.get_matrix() if isinstance(W, workload.Workload) else W
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -447,10 +488,12 @@ class DawaStriped(Base):
         ys = []
         scale_factors = []
         group_idx = sorted(set(striped_mapping))
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
         for i in group_idx: 
             x_i = x_sub_list[group_idx.index(i)]
             P_i = support.projection_matrix(striped_mapping, i)
-            W_i = W.get_matrix() * P_i.T
+            W_i = W * P_i.T
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x_i, prng)
@@ -535,8 +578,10 @@ class MwemVariantB(Base):
         domain_size = np.prod(self.domain_shape)
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
+        
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
 
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        W_partial = sparse.csr_matrix(W.shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
 
         M_history = np.empty((0, domain_size))
@@ -544,7 +589,7 @@ class MwemVariantB(Base):
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -584,14 +629,17 @@ class MwemVariantC(Base):
         domain_size = np.prod(self.domain_shape)
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+            
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+        W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()), 
+            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W), 
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
@@ -626,7 +674,10 @@ class MwemVariantD(Base):
         domain_size = np.prod(self.domain_shape)
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        
+        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+        W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
 
         measured_queries = []
@@ -634,7 +685,7 @@ class MwemVariantD(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
+            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W),
                                                   W_partial, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
