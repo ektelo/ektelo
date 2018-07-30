@@ -13,6 +13,7 @@ from ektelo.private import pselection
 from ektelo.private import transformation
 import numpy as np
 from scipy import sparse
+from functools import reduce
 
 
 class Identity(Base):
@@ -508,6 +509,103 @@ class DawaStriped(Base):
             noise_scale_factor = laplace_scale_factor(
                 M_bar, eps * (1 - self.ratio))
 
+            M_i = (M_bar * support.reduction_matrix(mapping)) * P_i
+
+            Ms.append(M_i)
+            ys.append(y_i)
+            scale_factors.append(noise_scale_factor)
+
+        x_hat = inference.LeastSquares().infer(Ms, ys, scale_factors)
+
+        return x_hat
+
+
+class DawaStriped_fast(Base):
+
+    def __init__(self, ratio, domain, stripe_dim, approx):
+        self.init_params = util.init_params_from_locals(locals())
+        self.ratio = ratio
+        self.domain = domain
+        self.stripe_dim = stripe_dim
+        self.approx = approx
+        super().__init__()
+
+#    def get_subgroups(self, group):
+#        """
+#        Given a group id on the full vector, recover the group id for each 
+#        partition
+#        :param group: an integer corresponding to a group
+#        :return: a list of group ids - one for each dimension/subpartition
+#        """
+#        idx = np.where(self.hdvector == group)
+#        return [p.vector[i[0]] for p, i in zip(self.partitions, idx)]
+
+    def std_project_workload(self, w, mapping, groupID):
+
+        P_i = support.projection_matrix(mapping, groupID)
+        w = w.get_matrix() if isinstance(w, workload.Workload) else w
+        return w * P_i.T
+
+
+    def project_workload(self, w, partition_vectors, hd_vector, groupID):
+        # overriding standard projection for efficiency
+
+        if isinstance(w, workload.Kronecker):
+            combos = list(zip(partition_vectors, w.workloads, self.subgroups[groupID]))
+            # note: for efficiency, p.project_workload should remove 0 and duplicate rows
+            projected = [self.std_project_workload(q, p, g) for p, q, g in combos]
+
+            return reduce(sparse.kron, projected)
+        else:
+            return self.std_project_workload(w, hd_vector.flatten(), groupID)
+
+    def Run(self, W, x, eps, seed):
+        x = x.flatten()            
+        prng = np.random.RandomState(seed)
+
+
+        striped_vectors = mapper.Striped(self.domain, self.stripe_dim).partitions()
+        hd_vector = support.combine_all(striped_vectors)
+        striped_mapping = hd_vector.flatten()
+
+        np.save('sv.npy', striped_vectors)
+        np.save("hd.npy", hd_vector)
+
+        x_sub_list = meta.SplitByPartition(striped_mapping).transform(x)
+
+        Ms = []
+        ys = []
+        scale_factors = []
+        group_idx = sorted(set(striped_mapping))
+
+        # Given a group id on the full vector, recover the group id for each partition
+        # put back in loop to save memory
+        self.subgroups = {}
+        for i in group_idx:
+            selected_idx = np.where(hd_vector == i)
+            ans = [p[i[0]] for p, i in zip(striped_vectors, selected_idx)]
+            self.subgroups[i] = ans
+
+        for i in group_idx: 
+            x_i = x_sub_list[group_idx.index(i)]
+            
+            W_i = self.project_workload(W, striped_vectors, hd_vector, i)
+
+            dawa = pmapper.Dawa(eps, self.ratio, self.approx)
+            mapping = dawa.mapping(x_i, prng)
+            reducer = transformation.ReduceByPartition(mapping)
+            x_bar = reducer.transform(x_i)
+            W_bar = W_i * support.expansion_matrix(mapping)
+
+            M_bar = selection.GreedyH(x_bar.shape, W_bar).select()
+            y_i = measurement.Laplace(
+                M_bar, eps * (1 - self.ratio)).measure(x_bar, prng)
+
+            noise_scale_factor = laplace_scale_factor(
+                M_bar, eps * (1 - self.ratio))
+
+            # convert the measurement back to the original domain for inference
+            P_i = support.projection_matrix(striped_mapping, i)
             M_i = (M_bar * support.reduction_matrix(mapping)) * P_i
 
             Ms.append(M_i)

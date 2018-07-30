@@ -104,6 +104,13 @@ class Striped(MapperOperator):
 
         return support.combine_all(vectors).flatten()
 
+    def partitions(self):
+        vectors = [np.arange(dom, dtype=int) for dom in self.domain_size]
+        vectors[self.stripe_dim] = np.ones(self.domain_size[self.stripe_dim], dtype=int)
+
+        return vectors
+
+
 
 class HilbertTransform(MapperOperator):
     '''

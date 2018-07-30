@@ -179,27 +179,6 @@ def canonical_ordering(mapping):
 def mapping_statistics(mapping):
     return np.unique(mapping, return_index=True, return_inverse=True, return_counts=True)   
 
-##############################################################
-# Transformation helpers
-##############################################################
-
-def project(mapping, idx, vector):
-    return projection_matrix(mapping, idx) * vector
-
-def unproject(mapping, idx, vector):
-    return vector * projection_matrix(mapping, idx)
-
-def reduce_data(mapping, data):
-    return expansion_matrix(mapping) * data
-
-def expand_data(mapping, data):
-    return reduction_matrix(mapping) * data
-
-def reduce_queries(mapping, queries):
-    return query * expansion_matrix(mapping) 
-
-def expand_queries(mapping, queries):
-    return queries * reduction_matrix(mapping)
 
 
 
