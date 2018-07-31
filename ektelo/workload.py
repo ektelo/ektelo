@@ -313,6 +313,61 @@ class Total(Workload, CartesianInstantiable):
         m.update(util.prepare_for_hash(self.__class__.__name__))
         m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
         return m.hexdigest()
+        
+class Concatenate(Workload):
+    """
+    A class for constructing workloads of the same shape by concatenating their queries.
+    """
+    def __init__(self, workloads, pretty_name = 'concat'):
+        """
+        :param workloads: a list of workoads defined on the same domain
+        :param pretty_name: name of this workload (default = 'concat')
+        :returns: A new workload with all the queries from the given workloads
+        
+        Note: this class provides an efficient implementation of W.get_matrix
+        for matrix_format='sparse', 'dense', and 'linop' assuming there is an
+        efficient implementation in each of the given workloads.
+        """
+        self.pretty_name = pretty_name
+        self.workloads = workloads
+        assert len(workloads) >= 1, 'must have at least 1 workload'
+        domain_shape = workloads[0].domain_shape
+        assert all(w.domain_shape == domain_shape for w in workloads), 'shape mismatch'
+        query_list = []
+        for w in workloads:
+            query_list.extend(w.query_list)
+        super(Concatenate, self).__init__(query_list, domain_shape)
+
+    # TODO(ryan): if the purpose of overriding is for efficiency
+    # should we even worry about dense matrices?
+    def compute_matrix_dense(self):
+        matrices = [w.compute_matrix_dense() for w in self.workloads]
+        return numpy.vstack(matrices)
+
+    # overridden for efficiency
+    def compute_matrix_sparse(self):
+        matrices = [w.compute_matrix_sparse() for w in self.workloads]
+        return sparse.vstack(matrices).tocsr() # TODO(ryan): should we convert to csr?
+
+    def compute_matrix_linop(self):
+        linops = [w.compute_matrix_linop() for w in self.workloads]
+        sizes = [L.shape[0] for L in linops]
+        indices = numpy.cumsum(sizes)
+        n = numpy.prod(self.domain_shape)
+        m = sum(sizes)
+        def matvec(x):
+            return numpy.concatenate([L.matvec(x) for L in linops])
+        def rmatvec(x):
+            return sum(L.rmatvec(v) for L,v in zip(linops, numpy.split(x, indices)))
+        return linalg.LinearOperator((m,n), matvec, rmatvec, dtype=numpy.float64)
+
+    @property
+    def hash(self):
+        m = hashlib.sha1()
+        m.update(util.prepare_for_hash(self.__class__.__name__))
+        for w in self.workloads:
+            m.update(util.prepare_for_hash(w.hash))
+        return m.hexdigest()
 
 class Kronecker(Workload):
     """
@@ -368,6 +423,38 @@ class Kronecker(Workload):
             m.update(util.prepare_for_hash(w.hash))
         return m.hexdigest()
 
+class KWayMarginals(Concatenate, CartesianInstantiable):
+    """ Workload consisting of all K-way marginals where 0 <= k <= number of dimensions"""
+
+    def __init__(self, domain_shape, k, pretty_name = 'k-way marginals'):
+        self.init_params = util.init_params_from_locals(locals())
+        self.pretty_name = pretty_name
+        if type(domain_shape) is int:
+            domain_shape = (domain_shape,)
+        assert 0 <= k <= len(domain_shape), 'invalid k'
+        self.k = k
+        D = len(domain_shape)
+
+        idents = [Identity.oneD(n) for n in domain_shape]
+        totals = [Total(n) for n in domain_shape]
+
+        workloads = []
+        for c in itertools.combinations(list(range(D)), k):
+            oned = [idents[i] if i in c else totals[i] for i in range(D)]
+            workloads.append(Kronecker(oned))
+        super(self.__class__, self).__init__(workloads)
+    
+    @staticmethod
+    def instantiate(params):
+        return KWayMarginals(params['domain'],params['k'])
+
+    @property 
+    def hash(self):
+        m = hashlib.sha1()
+        m.update(util.prepare_for_hash(self.__class__.__name__))
+        m.update(util.prepare_for_hash(str(self.k)))
+        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
+        return m.hexdigest()
 
 class PrefixMarginals(Kronecker, CartesianInstantiable):
     """ Workload consisting of Prefix queries on dimensions identified by prefix_axes
