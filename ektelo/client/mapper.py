@@ -302,3 +302,26 @@ class WorkloadBased(MapperOperator):
     def mapping(self):
         return WorkloadBased.partition_lossless(self.W)
 
+
+class MarginalPartition(MapperOperator):
+    '''partition generator marginals of high dimensional data 
+    '''
+
+    def __init__(self, domain_shape, proj_dim=-1):
+        '''default partition: build histogram on the last dimension
+        '''
+        self.init_params = util.init_params_from_locals(locals())
+        self.proj_dim = proj_dim
+        self.domain_shape = domain_shape
+
+   
+    def mapping(self):
+
+        assert self.proj_dim<len(self.domain_shape), "proj_dim out of range"
+
+        margin_vec = [ np.array([1]*i) for i in self.domain_shape]
+
+        margin_vec[self.proj_dim] = np.arange(self.domain_shape[self.proj_dim]) # the projecting dimension
+
+
+        return support.combine_all(margin_vec).flatten()

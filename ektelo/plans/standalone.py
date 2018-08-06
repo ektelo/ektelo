@@ -563,13 +563,9 @@ class DawaStriped_fast(Base):
         x = x.flatten()            
         prng = np.random.RandomState(seed)
 
-
         striped_vectors = mapper.Striped(self.domain, self.stripe_dim).partitions()
         hd_vector = support.combine_all(striped_vectors)
         striped_mapping = hd_vector.flatten()
-
-        np.save('sv.npy', striped_vectors)
-        np.save("hd.npy", hd_vector)
 
         x_sub_list = meta.SplitByPartition(striped_mapping).transform(x)
 
@@ -589,6 +585,7 @@ class DawaStriped_fast(Base):
         for i in group_idx: 
             x_i = x_sub_list[group_idx.index(i)]
             
+            # overwriting standard projection for efficiency
             W_i = self.project_workload(W, striped_vectors, hd_vector, i)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
@@ -805,4 +802,95 @@ class MwemVariantD(Base):
         return x_hat
 
 
-            
+class HDMarginals(Base):
+    '''
+    High dimensional plan with all marginal measurements 
+    '''
+
+    def __init__(self):
+        self.init_params = {}
+        super().__init__()
+
+    def Run(self, W, x, eps, seed):
+        domain_shape = x.shape
+        x = x.flatten()
+        prng = np.random.RandomState(seed)
+
+        M = selection.HDMarginal(domain_shape).select()
+
+        y  = measurement.Laplace(M, eps).measure(x, prng)
+        x_hat = inference.LeastSquares(method='lsmr').infer(M, y)
+
+        return x_hat 
+
+class HDMarginalsSmart(Base):
+    '''
+    Using different approaches to estimate marginals of the data. 
+    The choice of approach is only base on the domain of the marginal.
+    Assume the data dimension is known and given to the plan
+    
+    Hacky implementation for the UCI credit data, use Identity for domain size <50,
+    else use use DAWA
+    '''
+    def __init__(self, domain_shape, ratio=0.25, approx=True):
+        self.domain_shape = domain_shape
+        self.ratio = ratio
+        self.approx = approx
+        super(HDMarginalsSmart, self).__init__()
+
+
+    def Run(self, W, x, eps, seed):
+        domain_dimension = len(self.domain_shape)
+        eps_share = util.old_div(float(eps), domain_dimension)
+
+        x = x.flatten()
+        prng = np.random.RandomState(seed)
+        
+        Ms = []
+        ys = []
+        scale_factors = []
+        for i in range(domain_dimension):
+            # Reducde domain to get marginals
+            marginal_mapping = mapper.MarginalPartition(
+                domain_shape=self.domain_shape, proj_dim=i).mapping()
+            reducer = transformation.ReduceByPartition(marginal_mapping)
+            x_i = reducer.transform(x)
+
+            if self.domain_shape[i] < 50:
+                # run identity subplan
+                M_i = selection.Identity(x_i.shape).select()
+                y_i = measurement.Laplace(M_i, eps_share).measure(x_i, prng)
+                noise_scale_factor = laplace_scale_factor(
+                    M_i, eps_share)
+                
+            else:
+                # run dawa subplan
+                W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+                W_i = W * support.expansion_matrix(marginal_mapping)
+
+                dawa = pmapper.Dawa(eps_share, self.ratio, self.approx)
+                mapping = dawa.mapping(x_i, prng)
+
+                reducer = transformation.ReduceByPartition(mapping)
+                x_bar = reducer.transform(x_i)
+                W_bar = W_i * support.expansion_matrix(mapping)
+
+                M_bar = selection.GreedyH(x_bar.shape, W_bar).select()
+                y_i = measurement.Laplace(
+                    M_bar, eps_share * (1 - self.ratio)).measure(x_bar, prng)
+
+                noise_scale_factor = laplace_scale_factor(
+                    M_bar, eps_share * (1 - self.ratio))
+
+                # expand the dawa reduction
+                M_i = M_bar * support.reduction_matrix(mapping)
+
+            MM = M_i * support.reduction_matrix(marginal_mapping)
+            Ms.append(MM)
+            ys.append(y_i)
+            scale_factors.append(noise_scale_factor)
+
+        x_hat = inference.LeastSquares(method='lsmr').infer(Ms, ys, scale_factors)
+
+        return x_hat  
