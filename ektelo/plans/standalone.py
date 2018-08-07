@@ -15,6 +15,7 @@ import numpy as np
 from scipy import sparse
 from functools import reduce
 
+import dpcomp_core
 
 class Identity(Base):
 
@@ -530,16 +531,6 @@ class DawaStriped_fast(Base):
         self.approx = approx
         super().__init__()
 
-#    def get_subgroups(self, group):
-#        """
-#        Given a group id on the full vector, recover the group id for each 
-#        partition
-#        :param group: an integer corresponding to a group
-#        :return: a list of group ids - one for each dimension/subpartition
-#        """
-#        idx = np.where(self.hdvector == group)
-#        return [p.vector[i[0]] for p, i in zip(self.partitions, idx)]
-
     def std_project_workload(self, w, mapping, groupID):
 
         P_i = support.projection_matrix(mapping, groupID)
@@ -654,8 +645,6 @@ class StripedHB(Base):
         return x_hat
 
 
-
-
 class MwemVariantB(Base):
 
     def __init__(self, ratio, rounds, data_scale, domain_shape, use_history):
@@ -716,7 +705,7 @@ class MwemVariantC(Base):
         self.rounds = rounds
         self.data_scale = data_scale
         self.domain_shape = domain_shape
-        self.total_noise_scale = total_noise_scale  
+        self.total_noise_scale = total_noise_scale
         super().__init__()
 
     def Run(self, W, x, eps, seed):
@@ -725,12 +714,14 @@ class MwemVariantC(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
             
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        W = W.get_matrix() if isinstance(W, workload.Workload) \
+            or isinstance(W, dpcomp_core.workload.Workload) else W
 
         W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
 
-        measured_queries = []
+        M_history = np.empty((0, domain_size))
+        y_history = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
@@ -741,12 +732,19 @@ class MwemVariantC(Base):
             W_next = worst_approx.select(x, prng)
             M = support.extract_M(W_next)
             W_partial += W_next
-            laplace = measurement.Laplace(M, eps * (1-self.ratio))
+
+            laplace = measurement.Laplace(M, eps_round * (1-self.ratio))
             y = laplace.measure(x, prng)
+
+            # default use history
+            M_history = sparse.vstack([M_history, M])
+            y_history.extend(y)
+            
+
             if self.total_noise_scale != 0:
                 total_query = sparse.csr_matrix([1]*domain_size)
-                noise_scale = laplace_scale_factor(M, eps * (1-self.ratio))
-                x_hat = nnls.infer([total_query, M], [[self.data_scale], y], [self.total_noise_scale, noise_scale])
+                noise_scale = laplace_scale_factor(M, eps_round * (1-self.ratio))
+                x_hat = nnls.infer([total_query, M_history], [[self.data_scale], y_history], [self.total_noise_scale, noise_scale])
             else:
                 x_hat = nnls.infer(M, y)
 
@@ -770,12 +768,14 @@ class MwemVariantD(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        W = W.get_matrix() if isinstance(W, workload.Workload) \
+            or isinstance(W, dpcomp_core.workload.Workload) else W
 
         W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
 
-        measured_queries = []
+        M_history = np.empty((0, domain_size))
+        y_history = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
@@ -790,12 +790,17 @@ class MwemVariantD(Base):
 
             W_partial += W_next
 
-            laplace = measurement.Laplace(M, eps * (1-self.ratio))
+            laplace = measurement.Laplace(M, eps_round * (1-self.ratio))
             y = laplace.measure(x, prng)
+
+                        # default use history
+            M_history = sparse.vstack([M_history, M])
+            y_history.extend(y)
+            
             if self.total_noise_scale != 0:
                 total_query = sparse.csr_matrix([1]*domain_size)
-                noise_scale = laplace_scale_factor(M, eps * (1-self.ratio))
-                x_hat = nnls.infer([total_query, M], [[self.data_scale], y], [self.total_noise_scale, noise_scale])
+                noise_scale = laplace_scale_factor(M, eps_round * (1-self.ratio))
+                x_hat = nnls.infer([total_query, M_history], [[self.data_scale], y_history], [self.total_noise_scale, noise_scale])
             else:
                 x_hat = nnls.infer(M, y)
 
