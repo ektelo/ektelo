@@ -4,7 +4,7 @@ from ektelo.client import inference
 from ektelo.client import selection
 from ektelo.client import mapper
 from ektelo.client.measurement import laplace_scale_factor
-from ektelo import matrix
+from ektelo import math, matrix
 from ektelo.plans.common import Base
 from ektelo.private import measurement
 from ektelo.private import meta

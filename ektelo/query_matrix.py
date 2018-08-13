@@ -1,4 +1,4 @@
-from matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker
+from ektelo.matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker
 import collections
 import itertools
 import numpy as np
@@ -132,16 +132,31 @@ class Hierarchical(EkteloMatrix):
         self.n = n
         self.branch = branch
         self.dtype = dtype
+        self.shape = (_hierarchical_rows(n, branch), n)
         
-    def _matmat(self, V):
-        return NotImplemented
+    def _matvec(self, x):
+        m = x.shape[0]
+        b = self.branch
+        ans = [x]
+        while m > 1:
+            r = m % b
+            y = sum(x[i::b] for i in range(r,b))
+            if r > 0:
+                y = sum(x[i::b] for i in range(r)) + np.append(y,0)
+            x = y
+            m = x.shape[0]
+            ans.append(x)
+        return np.concatenate(ans[::-1])
     
     def _transpose(self):
         return NotImplemented
     
     @property
     def matrix(self):
-        return _hierarchical_sparse(self.n, self.branch)
+        H = _hierarchical_sparse(self.n, self.branch)
+        widths = np.array(H.sum(axis=1)).flatten()
+        perm = np.argsort(-widths)
+        return H[perm]
 
 class PIdentity(EkteloMatrix):
     def __init__(self, theta):
@@ -202,6 +217,13 @@ def _wavelet_sparse(n):
     B = sparse.kron(I2, [1,-1])
     return sparse.vstack([A,B])
 
+def _hierarchical_rows(n,b):
+    if n <= 1: return n
+    m, r = divmod(n,b)
+    rows0 = _hierarchical_rows(m, b)
+    rows1 = _hierarchical_rows(m+1, b) if r>0 else 0
+    return 1 + r*rows1 + (b-r)*rows0
+
 def _hierarchical_sparse(n, b):
     '''
     Builds a sparsely represented (csr_matrix) hierarchical matrix
@@ -216,6 +238,6 @@ def _hierarchical_sparse(n, b):
     hier1 = _hierarchical_sparse(m+1, b) if r>0 else None 
     total = np.ones((1,n))
     sub = sparse.block_diag([hier1]*r + [hier0]*(b-r), format='csr')
-    return sparse.vstack([total, sub])
+    return sparse.vstack([total, sub], format='csr')
 
 

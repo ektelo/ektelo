@@ -70,7 +70,10 @@ class EkteloMatrix(LinearOperator):
     # deprecate this if possible, only works with sparse matrix backing
     # should call dense_matrix instead
     def toarray(self):
-        return self.matrix.toarray()
+        return self.dense_matrix()
+
+    def tocsr(self):
+        return sparse.csr_matrix(self.matrix)
 
     def _adjoint(self):
         return self._transpose()

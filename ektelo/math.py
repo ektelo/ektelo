@@ -4,15 +4,16 @@ import scipy.sparse
 import scipy.sparse.linalg
 import scipy.sparse.linalg.interface
 from scipy.sparse import spmatrix
-
+from ektelo import matrix
 
 def vstack(dmatrices, format=None, dtype=None):
     types = {type(mat) for mat in dmatrices}
 
     if len(types) == 1 and types.copy().pop() == DelegateMatrix:
         blocks = [dmat.tocsr() for dmat in dmatrices]
-
         return DelegateMatrix(scipy.sparse.vstack(blocks, format, dtype))
+    elif types == { matrix.EkteloMatrix }:
+        return matrix.VStack(dmatrices)
     elif DelegateMatrix not in types:
         return scipy.sparse.vstack(dmatrices)
     else:

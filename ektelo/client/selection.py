@@ -12,6 +12,7 @@ import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
+from ektelo import matrix, query_matrix
 
 
 def flatten_measurements(m, dsize, sparse_flag = 1):
@@ -296,7 +297,8 @@ class Identity(SelectionOperator):
         self.domain_shape = domain_shape
 
     def select(self):
-        return sparse.identity(self.domain_shape[0])
+        return matrix.Identity(self.domain_shape[0])
+        #return sparse.identity(self.domain_shape[0])
 
 
 class Total(SelectionOperator):
@@ -309,7 +311,8 @@ class Total(SelectionOperator):
         self.domain_shape = domain_shape
 
     def select(self):
-        return np.ones((1, self.domain_shape[0]), dtype=np.float)
+        return query_matrix.Total(self.domain_shape[0])
+        #return np.ones((1, self.domain_shape[0]), dtype=np.float)
 
 
 class H2(SelectionOperator):
@@ -341,7 +344,7 @@ class H2(SelectionOperator):
         else:
             h_queries = buildHierarchical_sparse(self.domain_shape[0], self.branching)
 
-        return h_queries
+        return matrix.EkteloMatrix(h_queries)
 
 
 class HB(SelectionOperator):
@@ -375,7 +378,7 @@ class HB(SelectionOperator):
                              branching, 
                              branching, 
                              self.sparse_flag)
-        return h_queries
+        return matrix.EkteloMatrix(h_queries)
 
 
 class GreedyH(SelectionOperator):
@@ -410,7 +413,7 @@ class GreedyH(SelectionOperator):
         mat = np.vstack(row_list)
         mat = sparse.csr_matrix(mat) if sparse.issparse(mat) is False else mat
 
-        return mat
+        return matrix.EkteloMatrix(mat)
 
     def _GreedyHierByLv(self, fullQtQ, n, offset, depth=0, withRoot=False):
         """Compute the weight distribution of one node of the tree by minimzing
@@ -497,7 +500,7 @@ class QuadTree(SelectionOperator):
 
     def select(self):
         strategy = quadtree(self.domain_shape[0], self.domain_shape[1], self.sparse_flag)
-        return strategy
+        return matrix.EkteloMatrix(strategy)
 
 
 class UniformGrid(SelectionOperator):
@@ -549,7 +552,7 @@ class UniformGrid(SelectionOperator):
         matrix = cells_to_query(cells, (n, m))
 
         return matrix
-
+        #return ektelo.matrix.EkteloMatrix(matrix)
 
 class AdaptiveGrid(SelectionOperator):
 
@@ -594,6 +597,7 @@ class AdaptiveGrid(SelectionOperator):
             matrix = cells_to_query(cells, (nn, mm))
 
         return matrix
+        #return ektelo.matrix.EkteloMatrix(matrix)
 
 
 class Wavelet(SelectionOperator):
@@ -686,7 +690,7 @@ class Wavelet(SelectionOperator):
         else:
             wavelet_query = Wavelet.wavelets(n)
 
-        return wavelet_query
+        return matrix.EkteloMatrix(wavelet_query)
 
 
 class AddEquiWidthIntervals(SelectionOperator):
@@ -700,6 +704,7 @@ class AddEquiWidthIntervals(SelectionOperator):
         self.grid_size = min(2 ** log_width, self.M_hat.shape[1])
 
     def select(self):
-        return ektelo.math.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        mat = ektelo.math.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        return matrix.EkteloMatrix(mat)
 
 
