@@ -15,7 +15,16 @@ import numpy as np
 from scipy import sparse
 from functools import reduce
 
-import dpcomp_core
+
+# When comparing with previous implementation with Workload from dpcomp_core
+#def get_matrix(W):
+#    return W.get_matrix() if isinstance(W, workload.Workload) \
+#            or isinstance(W, dpcomp_core.workload.Workload) else W
+
+
+def get_matrix(W):
+    return W.get_matrix() if isinstance(W, workload.Workload) else W
+
 
 class Identity(Base):
 
@@ -28,7 +37,7 @@ class Identity(Base):
         x = x.flatten()   
         prng = np.random.RandomState(seed)
         if self.workload_based:
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            W = get_matrix(W)
             mapping = mapper.WorkloadBased(W).mapping() 
             reducer = transformation.ReduceByPartition(mapping)
             x = reducer.transform(x)
@@ -101,7 +110,7 @@ class HB(Base):
         x = x.flatten()
         prng = np.random.RandomState(seed)
         if self.workload_based:
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            W = get_matrix(W)
             mapping = mapper.WorkloadBased(W).mapping() 
             reducer = transformation.ReduceByPartition(mapping)
             x = reducer.transform(x)
@@ -130,7 +139,7 @@ class GreedyH(Base):
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        W = get_matrix(W)
         M = selection.GreedyH(x.shape, W).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
@@ -203,7 +212,7 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        W = get_matrix(W)
 
         W_partial = sparse.csr_matrix(W.shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
@@ -258,7 +267,7 @@ class Ahp(Base):
         prng = np.random.RandomState(seed)
 
         if self.workload_based:
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            W = get_matrix(W)
             mapping = mapper.WorkloadBased(W).mapping() 
             reducer = transformation.ReduceByPartition(mapping)
             x = reducer.transform(x)
@@ -308,7 +317,7 @@ class Dawa(Base):
         prng = np.random.RandomState(seed)
 
         if self.workload_based:
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+            W = get_matrix(W)
             mapping = mapper.WorkloadBased(W).mapping() 
             reducer = transformation.ReduceByPartition(mapping)
             x = reducer.transform(x)
@@ -324,14 +333,17 @@ class Dawa(Base):
             domain_reducer = transformation.ReduceByPartition(hilbert_mapping)
 
             x = domain_reducer.transform(x)
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+            W = get_matrix(W)
 
             W = W * support.expansion_matrix(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
+
         elif len(self.domain_shape) == 1:
-            W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+            W = get_matrix(W)
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -490,7 +502,8 @@ class DawaStriped(Base):
         ys = []
         scale_factors = []
         group_idx = sorted(set(striped_mapping))
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+
+        W = get_matrix(W)
 
         for i in group_idx: 
             x_i = x_sub_list[group_idx.index(i)]
@@ -534,7 +547,7 @@ class DawaStriped_fast(Base):
     def std_project_workload(self, w, mapping, groupID):
 
         P_i = support.projection_matrix(mapping, groupID)
-        w = w.get_matrix() if isinstance(w, workload.Workload) else w
+        w = get_matrix(w)
         return w * P_i.T
 
 
@@ -663,7 +676,8 @@ class MwemVariantB(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         
-        W = W.get_matrix() if isinstance(W, workload.Workload) else W
+        W = get_matrix(W)
+
 
         W_partial = sparse.csr_matrix(W.shape)
         mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
@@ -714,8 +728,7 @@ class MwemVariantC(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
             
-        W = W.get_matrix() if isinstance(W, workload.Workload) \
-            or isinstance(W, dpcomp_core.workload.Workload) else W
+        W = get_matrix(W)
 
         W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
@@ -768,8 +781,7 @@ class MwemVariantD(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         
-        W = W.get_matrix() if isinstance(W, workload.Workload) \
-            or isinstance(W, dpcomp_core.workload.Workload) else W
+        W = get_matrix(W)
 
         W_partial = sparse.csr_matrix(W.shape)
         nnls = inference.NonNegativeLeastSquares()
@@ -870,7 +882,7 @@ class HDMarginalsSmart(Base):
                 
             else:
                 # run dawa subplan
-                W = W.get_matrix() if isinstance(W, workload.Workload) else W
+                W = get_matrix(W)
 
                 W_i = W * support.expansion_matrix(marginal_mapping)
 
