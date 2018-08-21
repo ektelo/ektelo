@@ -14,16 +14,7 @@ from ektelo.private import transformation
 import numpy as np
 from scipy import sparse
 from functools import reduce
-
-
-# When comparing with previous implementation with Workload from dpcomp_core
-#def get_matrix(W):
-#    return W.get_matrix() if isinstance(W, workload.Workload) \
-#            or isinstance(W, dpcomp_core.workload.Workload) else W
-
-
-def get_matrix(W):
-    return W.get_matrix() if isinstance(W, workload.Workload) else W
+from ektelo.support import get_matrix
 
 
 class Identity(Base):
@@ -195,13 +186,14 @@ class Mwem(Base):
     http://dl.acm.org/citation.cfm?id=2999325.2999396
     """
 
-    def __init__(self, ratio, rounds, data_scale, domain_shape, use_history):
+    def __init__(self, ratio, rounds, data_scale, domain_shape, use_history, update_rounds=50):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.rounds = rounds
         self.data_scale = data_scale
         self.domain_shape = domain_shape
         self.use_history = use_history
+        self.update_rounds = update_rounds
         super().__init__()
 
     def Run(self, W, x, eps, seed):
@@ -215,7 +207,7 @@ class Mwem(Base):
         W = get_matrix(W)
 
         W_partial = sparse.csr_matrix(W.shape)
-        mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
+        mult_weight = inference.MultiplicativeWeights(updateRounds = self.update_rounds)
 
         M_history = np.empty((0, domain_size))
         y_history = []
@@ -660,13 +652,14 @@ class StripedHB(Base):
 
 class MwemVariantB(Base):
 
-    def __init__(self, ratio, rounds, data_scale, domain_shape, use_history):
+    def __init__(self, ratio, rounds, data_scale, domain_shape, use_history, update_rounds=50):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.rounds = rounds
         self.data_scale = data_scale
         self.domain_shape = domain_shape
         self.use_history = use_history
+        self.update_rounds = update_rounds
         super().__init__()
 
     def Run(self, W, x, eps, seed):
@@ -680,7 +673,7 @@ class MwemVariantB(Base):
 
 
         W_partial = sparse.csr_matrix(W.shape)
-        mult_weight = inference.MultiplicativeWeights(updateRounds = 50)
+        mult_weight = inference.MultiplicativeWeights(updateRounds = self.update_rounds)
 
         M_history = np.empty((0, domain_size))
         y_history = []
@@ -805,7 +798,7 @@ class MwemVariantD(Base):
             laplace = measurement.Laplace(M, eps_round * (1-self.ratio))
             y = laplace.measure(x, prng)
 
-                        # default use history
+            # default use history
             M_history = sparse.vstack([M_history, M])
             y_history.extend(y)
             

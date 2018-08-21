@@ -5,6 +5,7 @@ from .client import mapper
 from .client import measurement as cmeasurement
 from .private import measurement
 from .private import pselection
+from ektelo import support 
 
 
 def identity(shape):
@@ -65,3 +66,20 @@ def ugrid_mapper(shape, x_sum, eps, ag_flag=False, c=10, gz=0):
 
 def striped(domain, stripe_dim):
     return mapper.Striped(domain, stripe_dim).mapping()
+
+def hilbert(domain):
+    return mapper.HilbertTransform(domain).mapping()
+
+def marginal_partition(domain, proj_dim):
+    return mapper.MarginalPartition(
+                domain_shape=domain, proj_dim=proj_dim).mapping()
+
+def workload_based(x, W=None):
+    '''workload-based domain reduction
+    '''
+    mapping = mapper.WorkloadBased(W).mapping()
+    x = x.reduce_by_partition(mapping)
+    if W is not None:
+        W = support.get_matrix(W)
+        W = W * support.expansion_matrix(mapping)
+    return x, W
