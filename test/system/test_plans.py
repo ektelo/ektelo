@@ -18,6 +18,7 @@ class TestPlans(unittest.TestCase):
     cps_domain = (10, 2, 7, 2, 2)
     stroke_domain = (64, 64)
     x_cps = transformation.Vectorize('CPS', reduced_domain=cps_domain).transform(relation_cps)
+    x_cps_scale = x_cps.sum()
     x_stroke = transformation.Vectorize('STROKE', reduced_domain=stroke_domain).transform(relation_stroke)
     W_cps = workload.RandomRange(None, (len(x_cps),), 25)
     W_stroke = workload.RandomRange(None, (len(x_stroke),), 25)
@@ -188,7 +189,7 @@ class TestPlans(unittest.TestCase):
     def test_mwem_variant_b(self):
         ratio = 0.5
         rounds = 3
-        x_hat = standalone.MwemVariantB(ratio, rounds).Run(self.W_cps,
+        x_hat = standalone.MwemVariantB(ratio, rounds, self.x_cps_scale, self.cps_domain, True).Run(self.W_cps,
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
@@ -197,7 +198,7 @@ class TestPlans(unittest.TestCase):
     def test_mwem_variant_c(self):
         ratio = 0.5
         rounds = 3
-        x_hat = standalone.MwemVariantC(ratio, rounds).Run(self.W_cps,
+        x_hat = standalone.MwemVariantC(ratio, rounds, self.x_cps_scale, self.cps_domain, True).Run(self.W_cps,
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
@@ -206,7 +207,7 @@ class TestPlans(unittest.TestCase):
     def test_mwem_variant_d(self):
         ratio = 0.5
         rounds = 3
-        x_hat = standalone.MwemVariantD(ratio, rounds).Run(self.W_cps,
+        x_hat = standalone.MwemVariantD(ratio, rounds, self.x_cps_scale, self.cps_domain, True).Run(self.W_cps,
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)

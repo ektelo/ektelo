@@ -51,7 +51,7 @@ class TestWrapper(unittest.TestCase):
         data_scale = 1e5
         use_history = True
         x = self.x_cps.vectorize(self.cps_domain)
-        private.Mwem(self.cps_domain, ratio, rounds, data_scale, use_history).Run(self.W_cps, x, self.eps)
+        private.Mwem(ratio, rounds, data_scale, self.cps_domain, use_history).Run(self.W_cps, x, self.eps)
 
     def test_mwem_2D(self):
         ratio = 0.5
@@ -59,7 +59,7 @@ class TestWrapper(unittest.TestCase):
         data_scale = 1e5
         use_history = True
         x = self.x_stroke.vectorize(self.stroke_domain)
-        private.Mwem(self.stroke_domain, ratio, rounds, data_scale, use_history).Run(self.W_stroke, x, self.eps)
+        private.Mwem(ratio, rounds, data_scale, self.stroke_domain, use_history).Run(self.W_stroke, x, self.eps)
 
     def test_ahp(self):
         eta = 0.35
@@ -84,9 +84,9 @@ class TestWrapper(unittest.TestCase):
         private.QuadTree(self.cps_domain).Run(self.W_cps, x, self.eps)
 
     def test_ugrid(self):
-        x_sum = 49436
-        x = self.x_cps.vectorize(self.cps_domain)
-        private.UGrid(self.cps_domain, x_sum).Run(self.W_cps, x, self.eps)
+        x = self.x_stroke.vectorize(self.stroke_domain)
+        data_scale = 1e5
+        private.UGrid(self.stroke_domain, data_scale).Run(self.W_stroke, x, self.eps)
 
     def test_agrid(self):
         data_scale = 1e5
@@ -109,17 +109,26 @@ class TestWrapper(unittest.TestCase):
     def test_mwem_variant_b(self):
         ratio = 0.5
         rounds = 3
+        data_scale = 1e5
         x = self.x_cps.vectorize(self.cps_domain)
-        private.MwemVariantB(self.cps_domain, ratio, rounds).Run(self.W_cps, x, self.eps)
+        private.MwemVariantB(ratio, rounds, data_scale, self.cps_domain, use_history=True).Run(self.W_cps, x, self.eps)
 
     def test_mwem_variant_c(self):
         ratio = 0.5
         rounds = 3
+        data_scale = 1e5
+        total_noise_scale = 30
         x = self.x_cps.vectorize(self.cps_domain)
-        private.MwemVariantC(self.cps_domain, ratio, rounds).Run(self.W_cps, x, self.eps)
+        private.MwemVariantC(ratio, rounds, data_scale, self.cps_domain, total_noise_scale).Run(self.W_cps, x, self.eps)
 
     def test_mwem_variant_d(self):
         ratio = 0.5
         rounds = 3
+        data_scale = 1e5
+        total_noise_scale = 30
         x = self.x_cps.vectorize(self.cps_domain)
-        private.MwemVariantD(self.cps_domain, ratio, rounds).Run(self.W_cps, x, self.eps)
+        private.MwemVariantD(ratio, rounds, data_scale, self.cps_domain, total_noise_scale).Run(self.W_cps, x, self.eps)
+
+    def test_hd_marginal_smart(self):
+        x = self.x_cps.vectorize(self.cps_domain)
+        private.HDMarginalsSmart(self.cps_domain).Run(self.W_cps, x, self.eps)
