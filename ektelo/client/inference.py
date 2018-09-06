@@ -118,56 +118,22 @@ class ScalableInferenceOperator(InferenceOperator):
 
     def _apply_scales(self, Ms, ys, scale_factors):
         if scale_factors is None:
-            M = Ms
-            y = ys
-            noise_scales = [1.0] * len(y)
-        else:
-            assert type(Ms) == list and type(ys) == list
-            assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
+            return Ms, ys
+        assert type(Ms) == list and type(ys) == list
+        assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
+
+        A = matrix.VStack([M*(1.0/w) for M, w in zip(Ms, scale_factors)])
+        y = np.concatenate([y/w for y, w in zip(ys, scale_factors)])
         
-            M = None
-            y = []
-            noise_scales = []
-
-            for i in range(len(scale_factors)):
-                if M is None:
-                    M = Ms[i]
-                else:
-                    M = matrix.VStack((M, Ms[i]))
-                y = np.concatenate((y, ys[i]))
-                noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(ys[i])))
-
-        return get_A(M, noise_scales), get_y(y, noise_scales).flatten()
-
+        return A, y
 
 class LeastSquares(ScalableInferenceOperator):
 
-    def __init__(self, method='lsmr', l2_reg=0.0, known_total=None, stein=False):
+    def __init__(self, method='lsmr', l2_reg=0.0):
         super(LeastSquares, self).__init__()
 
         self.method = method
         self.l2_reg = l2_reg
-        self.known_total = known_total
-        self.stein = stein
-
-    def __known_total_problem(self, A, y):
-        m, n = A.shape
-        A0, A1 = A[:, :n - 1], A[:, n - 1]
-        if type(A) == np.ndarray:
-            z = y - A1 * self.known_total
-            return A0 - A1.reshape(m, 1), z
-        else:
-            A1 = A1.toarray().flatten()
-            z = y - A1 * self.known_total
-
-        def matvec(v):
-            return A0.dot(v) - A1 * v.sum()
-
-        def rmatvec(v):
-            return A0.T.dot(v) - A1.dot(v)
-        B = LinearOperator(shape=(m, n - 1), matvec=matvec,
-                           rmatvec=rmatvec, dtype=np.float64)
-        return B, z
 
     def infer(self, Ms, ys, scale_factors=None):
         ''' Either:
@@ -178,33 +144,20 @@ class LeastSquares(ScalableInferenceOperator):
         '''
         A, y = self._apply_scales(Ms, ys, scale_factors)
 
-        if self.known_total is not None:
-            A, y = self.__known_total_problem(A, y)
-
         if self.method == 'standard':
             assert self.l2_reg == 0, 'l2 reg not supported with method=standard'
-            assert isinstance(
-                A, np.ndarray), "method 'standard' only works with dense matrices"
-            (x_est, _, rank, _) = linalg.lstsq(A, y, lapack_driver='gelsy')
+            (x_est, _, rank, _) = linalg.lstsq(A.dense_matrix(), y, lapack_driver='gelsy')
         elif self.method == 'lsmr':
+            print(A.shape, y.shape)
             res = lsmr(A, y, atol=0, btol=0, damp=self.l2_reg)
             x_est = res[0]
         elif self.method == 'lsqr':
             res = lsqr(A, y, atol=0, btol=0, damp=self.l2_reg)
             x_est = res[0]
 
-        if self.known_total is not None:
-            x_est = np.append(x_est, self.known_total - x_est.sum())
-
         x_est = x_est.reshape(A.shape[1])  # reshape to match shape of x
 
-        # James-Stein estimation
-        if self.stein and x_est.size >= 3:
-            adjustment = 1.0 - util.old_div((x_est.size - 2), (x_est**2).sum())
-            x_est *= adjustment
-
         return x_est
-
 
 class NonNegativeLeastSquares(ScalableInferenceOperator):
     '''
@@ -239,9 +192,7 @@ class NonNegativeLeastSquares(ScalableInferenceOperator):
         A, y = self._apply_scales(Ms, ys, scale_factors)
 
         if self.method == 'AS':
-            assert isinstance(
-                A, numpy.ndarray), "method 'AS' only works with dense matrices"
-            x_est, _ = optimize.nnls(A, y)
+            x_est, _ = optimize.nnls(A.dense_matrix(), y)
         elif self.method == 'LB':
             if self.lasso is None:
                 x_est, info = nls_lbfgs_b(A, y)

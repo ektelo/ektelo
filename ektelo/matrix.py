@@ -96,12 +96,19 @@ class EkteloMatrix(LinearOperator):
         if sparse.compressed._cs_matrix in type(other).mro():
             return EkteloMatrix(self.matrix * other)
         else:
-            raise TypeError('incompatible type %s for multiplication with EkteloMatrix' % type(other))
+            raise TypeError('incompatible type %s for multiplication with EkteloMatrix'%type(other))
             
     def __rmul__(self, other):
         if np.isscalar(other):
             return Weighted(self, other)
         return NotImplemented
+
+    def __getitem__(self, key):
+        # row indexing, subclasses may provide more efficient implementation
+        Q = self.matrix
+        if sparse.issparse(Q):
+            return EkteloMatrix(Q.getrow(key))
+        return EkteloMatrix(Q[key,None])
     
     def dense_matrix(self):
         """
@@ -280,7 +287,7 @@ class HStack(EkteloMatrix):
         self.shape = (m,n)
         self.matrices = matrices
         self.dtype = matrices[0].dtype
-        self.split = np.cumsum(cols)[::-1]
+        self.split = np.cumsum(cols)[:-1]
 
     def _matmat(self, V):
         vs = np.split(V, self.split)

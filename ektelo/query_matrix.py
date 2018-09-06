@@ -107,6 +107,14 @@ class AllRange(EkteloMatrix):
         r = np.arange(self.n) + 1
         X = np.outer(r, r[::-1])
         return EkteloMatrix(np.minimum(X, X.T))
+
+class RandomRange(EkteloMatrix):
+    def __init__(self, shape_list, domain_shape, size, seed=9001):
+        self.shape_list = list(shape_list)
+        self.seed = seed
+        self.size = size
+
+        prng = np.random.RandomState(seed)
     
 class Wavelet(EkteloMatrix):
     def __init__(self, n, dtype=np.float64):
