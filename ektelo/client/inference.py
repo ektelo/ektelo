@@ -102,7 +102,7 @@ def multWeightsUpdate(hatx, Q, Q_est, updateRounds = 1):
     total = sum(hatx)
 
     if not isinstance(Q, sparse.csc_matrix):
-        Q = sparse.csr_matrix(Q)
+        Q = sparse.csr_matrix(Q.sparse_matrix())
 
     for i in range(updateRounds):
         for q_est, q in zip(Q_est, Q):
