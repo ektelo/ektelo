@@ -115,7 +115,7 @@ class GreedyH(Base):
 
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
-        M = selection.GreedyH(x.shape, W.get_matrix()).select()
+        M = selection.GreedyH(x.shape, W).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -283,12 +283,14 @@ class Dawa(Base):
             domain_reducer = transformation.ReduceByPartition(hilbert_mapping)
 
             x = domain_reducer.transform(x)
-            W = W.get_matrix() * support.expansion_matrix(hilbert_mapping)
+            P = support.expansion_matrix(hilbert_mapping)
+            W = W * P
+            #W = W.get_matrix() * support.expansion_matrix(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
         elif len(self.domain_shape) == 1:
-            W = W.get_matrix()
+            #W = W.get_matrix()
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -448,7 +450,8 @@ class DawaStriped(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix(striped_mapping, i)
-            W_i = W.get_matrix() * P_i.T
+            #W_i = W.get_matrix() * P_i.T
+            W_i = W * P_i.T
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x_i, prng)

@@ -19,8 +19,8 @@ class TestPlans(unittest.TestCase):
     stroke_domain = (64, 64)
     x_cps = transformation.Vectorize('CPS', reduced_domain=cps_domain).transform(relation_cps)
     x_stroke = transformation.Vectorize('STROKE', reduced_domain=stroke_domain).transform(relation_stroke)
-    W_cps = workload.RandomRange(None, (len(x_cps),), 25)
-    W_stroke = workload.RandomRange(None, (len(x_stroke),), 25)
+    W_cps = workload.RandomRange(None, len(x_cps), 25)
+    W_stroke = workload.RandomRange(None, len(x_stroke), 25)
 
     def setUp(self):
         self.eps = 0.1
@@ -30,21 +30,21 @@ class TestPlans(unittest.TestCase):
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_privelet(self):
         x_hat = standalone.Privelet().Run(self.W_cps,
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_h2(self):
         x_hat = standalone.H2().Run(self.W_cps,
                                     self.x_cps,
                                     self.eps,
                                     self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_hb(self):
         domain_shape = (len(self.x_cps),)
@@ -52,28 +52,28 @@ class TestPlans(unittest.TestCase):
                                                 self.x_cps,
                                                 self.eps,
                                                 self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_hb_2D(self):
         x_hat = standalone.HB(self.stroke_domain).Run(self.W_stroke,
                                                       self.x_stroke,
                                                       self.eps,
                                                       self.seed)
-        self.W_stroke.get_matrix() * x_hat
+        self.W_stroke.dot(x_hat)
 
     def test_greedy_h(self):
         x_hat = standalone.GreedyH().Run(self.W_cps,
                                          self.x_cps,
                                          self.eps,
                                          self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_uniform(self):
         x_hat = standalone.Uniform().Run(self.W_cps,
                                          self.x_cps,
                                          self.eps,
                                          self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_privBayesLS(self):
         theta = 1
@@ -81,7 +81,7 @@ class TestPlans(unittest.TestCase):
                                                                    self.relation_cps,
                                                                    self.eps,
                                                                    self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_mwem(self):
         ratio = 0.5
@@ -97,7 +97,7 @@ class TestPlans(unittest.TestCase):
                                                  self.x_cps,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_mwem_2D(self):
         ratio = 0.5
@@ -112,7 +112,7 @@ class TestPlans(unittest.TestCase):
                                                  self.x_stroke,
                                                  self.eps,
                                                  self.seed)
-        self.W_stroke.get_matrix() * x_hat
+        self.W_stroke.dot(x_hat)
 
     def test_ahp(self):
         eta = 0.35
@@ -121,7 +121,7 @@ class TestPlans(unittest.TestCase):
                                                self.x_cps,
                                                self.eps,
                                                self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_dawa(self):
         ratio = 0.25
@@ -131,7 +131,7 @@ class TestPlans(unittest.TestCase):
                                                                  self.x_cps,
                                                                  self.eps,
                                                                  self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_dawa_2D(self):
         ratio = 0.25
@@ -140,14 +140,14 @@ class TestPlans(unittest.TestCase):
                                                                        self.x_stroke,
                                                                        self.eps,
                                                                        self.seed)
-        self.W_stroke.get_matrix() * x_hat
+        self.W_stroke.dot(x_hat)
 
     def test_quad_tree(self):
         x_hat = standalone.QuadTree().Run(self.W_cps,
                                           self.x_cps,
                                           self.eps,
                                           self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_ugrid(self):
         data_scale = 1e5
@@ -156,7 +156,7 @@ class TestPlans(unittest.TestCase):
                                                  x,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_agrid(self):
         data_scale = 1e5
@@ -165,7 +165,7 @@ class TestPlans(unittest.TestCase):
                                                  x,
                                                  self.eps,
                                                  self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_dawa_striped(self):
         stripe_dim = 0
@@ -175,7 +175,7 @@ class TestPlans(unittest.TestCase):
                                                                                        self.x_cps,
                                                                                        self.eps,
                                                                                        self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_striped_HB_slow(self):
         stripe_dim = 0
@@ -183,7 +183,7 @@ class TestPlans(unittest.TestCase):
                                                                       self.x_cps,
                                                                       self.eps,
                                                                       self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_mwem_variant_b(self):
         ratio = 0.5
@@ -192,7 +192,7 @@ class TestPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_mwem_variant_c(self):
         ratio = 0.5
@@ -201,7 +201,7 @@ class TestPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)
 
     def test_mwem_variant_d(self):
         ratio = 0.5
@@ -210,4 +210,4 @@ class TestPlans(unittest.TestCase):
                                                            self.x_cps,
                                                            self.eps,
                                                            self.seed)
-        self.W_cps.get_matrix() * x_hat
+        self.W_cps.dot(x_hat)

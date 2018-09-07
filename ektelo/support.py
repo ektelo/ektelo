@@ -1,6 +1,7 @@
 from __future__ import division
 from builtins import zip
 from ektelo import util
+from ektelo.matrix import EkteloMatrix
 from functools import reduce
 import math
 import numpy as np
@@ -219,14 +220,7 @@ def reduction_matrix(mapping, canonical_order=False):
     cols = np.arange(n)
     rows = inverse
 
-    return sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int)
-
-
-def reduction_matrix_hdmm(mapping, canonical_order=False):
-    from ektelo.matrix import EkteloMatrix
-
-    return EkteloMatrix(reduction_matrix(mapping, canonical_order))
-
+    return EkteloMatrix(sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int))
 
 def expansion_matrix(mapping, canonical_order=False):
     """ Returns an n x m matrix E where n is the dimension of 
@@ -251,14 +245,7 @@ def expansion_matrix(mapping, canonical_order=False):
     R = sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int)
     scale = sparse.spdiags(1.0 /counts, 0, m, m)
 
-    return R.T * scale
-
-
-def expansion_matrix_hdmm(mapping, canonical_order=False):
-    from ektelo.matrix import EkteloMatrix
-
-    return EkteloMatrix(expansion_matrix(mapping, canonical_order))
-
+    return EkteloMatrix(R.T * scale)
 
 def projection_matrix(mapping, idx):
     """ Returns m x n matrix P where n is the dimension of the 
@@ -281,13 +268,7 @@ def projection_matrix(mapping, idx):
     vals = np.ones_like(rows)
     P = sparse.csr_matrix((vals, (rows, cols)), (rows.size, mask.size))
 
-    return P
-
-
-def projection_matrix_hdmm(mapping, idx):
-    from ektelo.matrix import EkteloMatrix
-
-    return EkteloMatrix(projection_matrix(mapping, idx))
+    return EkteloMatrix(P)
 
 def combine(p1, p2):
     """ Returns p3, an (n+m) dimensional array of integers such that

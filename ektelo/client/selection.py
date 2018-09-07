@@ -394,11 +394,7 @@ class GreedyH(SelectionOperator):
         self._granu = granu
 
     def select(self):
-        if not isinstance(self.W, np.ndarray):
-            W = self.W.toarray()
-        else:
-            W = self.W
-        QtQ = np.dot(W.T, W)
+        QtQ = self.W.gram().dense_matrix()
         n = self.domain_shape[0]
         err, inv, weights, queries = self._GreedyHierByLv(
             QtQ, n, 0, withRoot=False)
@@ -573,7 +569,7 @@ class AdaptiveGrid(SelectionOperator):
 
         if shape == (1, 1):
             # skip the calucation of newgrids if shape is of size 1
-            matrix = sparse.csr_matrix(([1], ([0], [0])), shape=(1, 1))
+            mymatrix = sparse.csr_matrix(([1], ([0], [0])), shape=(1, 1))
             newgrid = 1
 
         else:
@@ -594,11 +590,9 @@ class AdaptiveGrid(SelectionOperator):
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
             # generate cell and pending queries base on new celss
             cells = GenerateCells(nn, mm, num1, num2, newgrid)
-            matrix = cells_to_query(cells, (nn, mm))
+            mymatrix = cells_to_query(cells, (nn, mm))
 
-        return matrix
-        #return ektelo.matrix.EkteloMatrix(matrix)
-
+        return matrix.EkteloMatrix(mymatrix)
 
 class Wavelet(SelectionOperator):
     '''
