@@ -9,27 +9,6 @@ import ektelo
 from ektelo import util
 from ektelo.operators import InferenceOperator
 
-
-def get_A(M, noise_scales):
-    """
-        Calculate matrix 'A' of measurements, scaled appropriately for inference
-
-    """
-    sf = (util.old_div(1.0, np.array(noise_scales)))    # reciprocal of each noise scale
-    D = matrix.diag_like(M, sf, 0, sf.size, sf.size)
-    return D * M  # scale rows
-
-
-def get_y(ans, noise_scales):
-    """
-        Calculate 'y' of answers, scaled appropriately for inference
-    """
-    sf = (util.old_div(1.0, np.array(noise_scales)))    # reciprocal of each noise scale
-    y = ans * sf                      # element-wise multiplication
-    y = y[:, np.newaxis]          # make column vector
-    return y
-
-
 def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
     """
     Solves the NNLS problem min || Ax - y || s.t. x >= 0 using gradient-based optimization
@@ -57,38 +36,11 @@ def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
     xest[xest < 0] = 0.0
     return xest, info
 
-
-def nls_slsqp(A, y, known_total):
-    N = A.shape[1]
-    M = sparse.linalg.aslinearoperator(A)
-
-    def loss_and_grad(x):
-        diff = M.matvec(x) - y
-        res = 0.5 * np.sum(diff ** 2)
-
-        return res, M.rmatvec(diff)
-
-    xinit = np.zeros(N)
-    bnds = [(0,None)]*N
-    cons = {'type':'eq',
-            'fun':lambda x: x.sum()-known_total,
-            'jac':lambda _: np.ones(N)}
-    opts = { 'maxiter' : 10000 }
-    res = optimize.minimize(loss_and_grad,
-                            xinit,
-                            method='SLSQP',
-                            jac=True,
-                            bounds=bnds,
-                            constraints=cons,
-                            options=opts)
-
-    return res.x
-
-
 def eval_x(hatx, q):
     """evaluation of a query in the form of t"""
-    return float(q.dot(hatx))
-
+    # note(ryan): the need for float(.) was due to pathologies in sparse matrix behavior
+    # I think we can safely delete this with EkteloMatrix
+    return float(q.dot(hatx)) 
 
 def multWeightsUpdate(hatx, Q, Q_est, updateRounds = 1):
     """ Multiplicative weights update, supporting multiple measurements and repeated update rounds
@@ -101,8 +53,8 @@ def multWeightsUpdate(hatx, Q, Q_est, updateRounds = 1):
 
     total = sum(hatx)
 
-    if not isinstance(Q, sparse.csc_matrix):
-        Q = sparse.csr_matrix(Q.sparse_matrix())
+    # TODO: this update rule shouldn't require materializing Q
+    Q = sparse.csr_matrix(Q.sparse_matrix())
 
     for i in range(updateRounds):
         for q_est, q in zip(Q_est, Q):
@@ -118,6 +70,8 @@ class ScalableInferenceOperator(InferenceOperator):
 
     def _apply_scales(self, Ms, ys, scale_factors):
         if scale_factors is None:
+            if type(Ms) is list:
+                return matrix.VStack(Ms), np.concatenate(ys)
             return Ms, ys
         assert type(Ms) == list and type(ys) == list
         assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
@@ -165,13 +119,8 @@ class NonNegativeLeastSquares(ScalableInferenceOperator):
     Note: undefined behavior when system is under-constrained
     '''
 
-    def __init__(self, method='LB', lasso=None):
+    def __init__(self, lasso=None):
         '''
-        :param method: method for solving nnls
-            'AS' for Active Set method (only for dense matrices)
-            'LB' for L-BFGS-B algorithm (default; good for sparse and dense)
-            'TRF' for Trust Region Reflective algorithm (best with sparse matrices)
-        :param useAll: flag to use all measurements or most recent measurements
         :param lasso:
             None for no regularization
             True for regularization as determined by total estimate give by least squares
@@ -179,7 +128,6 @@ class NonNegativeLeastSquares(ScalableInferenceOperator):
         '''
         super(NonNegativeLeastSquares, self).__init__()
 
-        self.method = method
         self.lasso = lasso
 
     def infer(self, Ms, ys, scale_factors=None):
@@ -191,24 +139,13 @@ class NonNegativeLeastSquares(ScalableInferenceOperator):
         '''
         A, y = self._apply_scales(Ms, ys, scale_factors)
 
-        if self.method == 'AS':
-            x_est, _ = optimize.nnls(A.dense_matrix(), y)
-        elif self.method == 'LB':
-            if self.lasso is None:
-                x_est, info = nls_lbfgs_b(A, y)
-            if self.lasso:
-                lasso = max(0, lsmr(A, y)[0].sum()
-                            ) if self.lasso is True else self.lasso
-                x_est = nls_slsqp(A, y, lasso)
-        elif self.method == 'TRF':
-            x_est = optimize.lsq_linear(
-                A, y, bounds=(0, numpy.inf), tol=1e-3)['x']
-        x_est = x_est.reshape(A.shape[1])  # reshape to match shape of x
+        x_est, info = nls_lbfgs_b(A, y)
 
+        x_est = x_est.reshape(A.shape[1])  # reshape to match shape of x
         return x_est
 
 
-class MultiplicativeWeights(InferenceOperator):
+class MultiplicativeWeights(ScalableInferenceOperator):
     '''
     Multiplicative weights update with multiple update rounds and optional history
     useHistory is no longer available inside the operator. To use history measurements,
@@ -219,29 +156,6 @@ class MultiplicativeWeights(InferenceOperator):
         super(MultiplicativeWeights, self).__init__()
         self.updateRounds = updateRounds
 
-    def __consolidate(self, Ms, ys, scale_factors):
-        if scale_factors is None:
-            M = Ms
-            y = ys
-            noise_scales = [1.0] * len(y)
-        else:
-            assert type(M) == list and type(ys) == list
-            assert len(Ms) == len(ys) and len(ys) == len(scale_factors)
-        
-            M = None
-            y = []
-            noise_scales = []
-
-            for i in range(len(scale_factors)):
-                if M is None:
-                    M = M_i
-                else:
-                    M = matrix.VStack((M, Ms[i]))
-                y = np.concatenate((y, ys[i]))
-                noise_scales = np.concatenate((noise_scales, [scale_factors[i]] * len(y_i)))
-
-        return M, y, noise_scales
-
     def infer(self, Ms, ys, x_est, scale_factors=None):
         ''' Either:
             1) Ms is a single M and ys is a single y 
@@ -249,14 +163,10 @@ class MultiplicativeWeights(InferenceOperator):
             2) Ms and ys are lists of M matrices and y vectors
                and scale_factors is a list of the same length.
         '''
-        M, y, noise_scales = self.__consolidate(Ms, ys, scale_factors)
+        M, y = self._apply_scales(Ms, ys, scale_factors)
 
         """ mult_weights is an update method which works on the original domain"""
         assert x_est is not None, 'Multiplicative Weights update needs a starting xest, but there is none.'
-
-        diff = np.array(noise_scales) - max(noise_scales)
-        assert np.allclose(diff, np.zeros_like(
-            diff)), 'Warning: Measurements have different noise scales but MW cannot handle this properly'
 
         x_est = multWeightsUpdate(x_est, M, y, self.updateRounds)
         return x_est

@@ -1,5 +1,6 @@
 from ektelo import support
 from ektelo import util
+from ektelo.matrix import EkteloMatrix, VStack
 from ektelo.client import inference
 from ektelo.client import selection
 from ektelo.client import mapper
@@ -180,6 +181,7 @@ class Mwem(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        # Note(ryan): try to fix up this implementation to not explicitly materialize the matrix W
         x = x.flatten()
         prng = np.random.RandomState(seed)
         domain_size = np.prod(self.domain_shape)
@@ -187,29 +189,28 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
+        measuredQueries = []
         mult_weight = inference.MultiplicativeWeights(updateRounds = 100)
 
-        M_history = np.empty((0, domain_size))
+        M_history = []
         y_history = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
-                                                  W_partial,
+            worst_approx = pselection.WorstApprox(W,
+                                                  measuredQueries,
                                                   x_hat,
                                                   eps_round * self.ratio,
                                                   'EXPONENTIAL')
-            W_next = worst_approx.select(x, prng)
-            M = support.extract_M(W_next)
-            W_partial += W_next
+            M = worst_approx.select(x, prng)
+            measuredQueries.append(M.mwem_index)
 
             # LM 
             laplace = measurement.Laplace(M, eps_round * (1-self.ratio))
             y = laplace.measure(x, prng)
 
-            M_history = sparse.vstack([M_history, M])
-            y_history.extend(y)
+            M_history.append(M) 
+            y_history.append(y)
 
             # MW
             if self.use_history:
@@ -285,12 +286,10 @@ class Dawa(Base):
             x = domain_reducer.transform(x)
             P = support.expansion_matrix(hilbert_mapping)
             W = W * P
-            #W = W.get_matrix() * support.expansion_matrix(hilbert_mapping)
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
         elif len(self.domain_shape) == 1:
-            #W = W.get_matrix()
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
             mapping = dawa.mapping(x, prng)
 
@@ -450,7 +449,6 @@ class DawaStriped(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix(striped_mapping, i)
-            #W_i = W.get_matrix() * P_i.T
             W_i = W * P_i.T
 
             dawa = pmapper.Dawa(eps, self.ratio, self.approx)
