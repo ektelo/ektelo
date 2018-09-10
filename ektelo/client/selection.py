@@ -271,20 +271,18 @@ def cells_to_query(cells,domain):
     '''
     query_number = len(cells)
     domain_size = np.prod(domain)
-    matrix = sparse.lil_matrix((query_number, domain_size))
+    ans = sparse.lil_matrix((query_number, domain_size))
 
     query_no = 0
     for ul,lr in cells:
         up, left = ul; low, right = lr
         for row in range(up,low+1):
             begin, end = np.ravel_multi_index([[row,row],[left,right]],domain)
-            matrix[query_no, begin:end+1] = [1]*(end-begin+1)
+            ans[query_no, begin:end+1] = [1]*(end-begin+1)
         query_no+=1
 
     # convert to csr format for fast arithmetic and matrix vector operations
-    matrix = matrix.tocsr()
-
-    return matrix
+    return ans.tocsr() 
 
 
 class Identity(SelectionOperator):
@@ -545,10 +543,9 @@ class UniformGrid(SelectionOperator):
 
         # TODO: potential optimization if grid ==1 identity workload
         cells = GenerateCells(n, m, num1, num2, grid)
-        matrix = cells_to_query(cells, (n, m))
+        ans = cells_to_query(cells, (n, m))
 
-        return matrix
-        #return ektelo.matrix.EkteloMatrix(matrix)
+        return matrix.EkteloMatrix(ans)
 
 class AdaptiveGrid(SelectionOperator):
 

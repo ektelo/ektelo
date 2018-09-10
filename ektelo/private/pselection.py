@@ -70,6 +70,7 @@ class WorstApprox(SelectionOperator):
         true_answers = self.W.dot(x)
         est_answers = self.W.dot(self.x_est)
         scores = np.abs(true_answers - est_answers)
+
         if (self.mechanism == "NOISYMAX"):
             index = noisyMax(scores, 1.0, self.eps, prng, self.measuredQueries)
         elif (self.mechanism == "EXPONENTIAL"):

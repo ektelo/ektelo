@@ -431,7 +431,7 @@ class MwemVariantB(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        x_hat = np.random.rand(self.n, 1)
+        x_hat = np.random.rand(self.n)
 
         measuredQueries = []
         for i in range(1, self.rounds+1):
@@ -462,7 +462,7 @@ class MwemVariantC(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        x_hat = np.random.rand(self.n, 1)
+        x_hat = np.random.rand(self.n)
         measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
@@ -487,19 +487,19 @@ class MwemVariantD(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
-        x_hat = np.random.rand(self.n, 1)
+        x_hat = np.random.rand(self.n)
 
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW + SH2
-            W_next = x.worst_approx(sparse.csr_matrix(W.get_matrix()),
-                                    W_partial,
+            W_next = x.worst_approx(W,
+                                    measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio)
+            measuredQueries.append(W_next.mwem_index)
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
-            W_partial += W_next
             y = x.laplace(M, eps_round * (1-self.ratio))
             x_hat = non_negative_least_squares(M, y)
 
