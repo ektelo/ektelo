@@ -34,7 +34,7 @@ class TestData(unittest.TestCase):
         self.X2 = DatasetFromRelation(relation, 'CPS-CSV', reduce_to_dom_shape=domain_alt)
 
         # Workload and Algorithms
-        self.W1 = workload.Prefix1D(20)
+        self.W1 = workload.Prefix(20)
         self.W2 = workload.RandomRange(None, (64,), 25)
         self.A2 = ahp.ahpND_engine()
 

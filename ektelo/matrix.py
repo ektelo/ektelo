@@ -1,3 +1,4 @@
+from ektelo import util
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
@@ -22,6 +23,10 @@ class EkteloMatrix(LinearOperator):
         self.dtype = matrix.dtype
         self.shape = matrix.shape
     
+    def asDict(self):
+        d = util.class_to_dict(self, ignore_list=[])
+        return d
+
     def _transpose(self):
         return EkteloMatrix(self.matrix.T)
     
