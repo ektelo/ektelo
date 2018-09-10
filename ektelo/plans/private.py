@@ -93,7 +93,7 @@ class GreedyH(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        M = greedyH((self.n,), W.get_matrix())
+        M = greedyH((self.n,), W)
         y = x.laplace(M, eps)
         x_hat = least_squares(M, y)
 
@@ -160,25 +160,23 @@ class Mwem(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
-
-        M_history = np.empty((0, domain_size))
+        M_history = []
         y_history = []
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            W_next = x.worst_approx(sparse.csr_matrix(W.get_matrix()),
-                                    W_partial,
+            M = x.worst_approx(W,
+                                    measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio,
                                     'EXPONENTIAL')
-            M = support.extract_M(W_next)
-            W_partial += W_next
+            measuredQueries.append(M.mwem_index)
 
             y = x.laplace(M, eps_round* (1-self.ratio))
 
-            M_history = math.vstack([M_history, M])
-            y_history.extend(y)
+            M_history.append(M)
+            y_history.append(y)
 
             if self.use_history:
                 x_hat = multiplicative_weights(M_history, y_history, x_hat, update_rounds=100)
@@ -232,7 +230,7 @@ class Dawa(Base):
     def Run(self, W, x, eps):
         mapping = x.dawa(self.ratio, self.approx, eps)
         x_bar = x.reduce_by_partition(mapping)
-        W_bar = W.get_matrix() * support.expansion_matrix(mapping)
+        W_bar = W * support.expansion_matrix(mapping)
         M_bar = greedyH((len(set(mapping)),), W_bar)
         y = x_bar.laplace(M_bar, eps)
         x_bar_hat = least_squares(M_bar, y)
@@ -368,7 +366,7 @@ class DawaStriped(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix(striped_mapping, i)
-            W_i = W.get_matrix() * P_i.T
+            W_i = W * P_i.T
 
             mapping = x_i.dawa(self.ratio, self.approx, eps)
 
@@ -407,7 +405,7 @@ class StripedHB(Base):
         for i in sorted(set(striped_mapping)):
             x_i = x_sub_list[i]
             P_i = support.projection_matrix(striped_mapping, i)
-            W_i = W.get_matrix() * P_i.T
+            W_i = W * P_i.T
 
             M_bar = hb((P_i.shape[0],)) 
             y_i = x_i.laplace(M_bar, eps)
@@ -433,20 +431,21 @@ class MwemVariantB(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
         x_hat = np.random.rand(self.n, 1)
 
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            W_next = x.worst_approx(sparse.csr_matrix(W.get_matrix()),
-                                    W_partial,
+            W_next = x.worst_approx(W,
+                                    measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio)
+            
+            measuredQueries.append(W_next.mwem_index)
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
-            W_partial += W_next
             y = x.laplace(M, eps_round * (1-self.ratio))
             x_hat = least_squares(M, y)
 
@@ -463,17 +462,15 @@ class MwemVariantC(Base):
         super().__init__()
 
     def Run(self, W, x, eps):
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
         x_hat = np.random.rand(self.n, 1)
-
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
-            W_next = x.worst_approx(sparse.csr_matrix(W.get_matrix()),
-                                    W_partial,
+            M = x.worst_approx(W,
+                                    measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio)
-            M = support.extract_M(W_next)
-            W_partial += W_next
+            measuredQueries.append(M.mwem_index)
             y = x.laplace(M, eps_round * (1-self.ratio))
             x_hat = non_negative_least_squares(M, y)
 

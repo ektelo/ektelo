@@ -3,15 +3,6 @@ from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
 from functools import reduce
 
-
-def diag_like(mat, data, diags, m, n, format=None):
-    diag = sparse.spdiags(data, diags, m, n, format)
-
-    if EkteloMatrix in type(mat).mro():
-        return EkteloMatrix(diag)
-    else:
-        return diag
-    
 def _any_sparse(matrices):
     return any(sparse.issparse(Q.matrix) for Q in matrices)
 
@@ -54,24 +45,19 @@ class EkteloMatrix(LinearOperator):
         # note: this works because np.abs calls self.__abs__
         return np.max(np.abs(self).sum(axis=1))
  
-    def sum(self, axis=None, dtype=None, out=None):
-        # GDB: I dropped my pass-through implementation in here because
-        # there were problem with your implementations (see below).
-        #return self.matrix.sum(axis, dtype, out)
-        
-        # RM: is it worth it to conform to the numpy api and support dtype/out? What does this buy us?
-        
-        # this implementation works for all subclasses too (as long as they define _matmat and _transpose)
+    def sum(self, axis=None):
+        # this implementation works for all subclasses too 
+        # (as long as they define _matmat and _transpose)
         if axis == 0:
             return self.dot(np.ones(self.shape[1]))
         ans = self.T.dot(np.ones(self.shape[0]))  
         return ans if axis == 1 else np.sum(ans)
     
-    # deprecate this if possible, only works with sparse matrix backing
-    # should call dense_matrix instead
+    # deprecate this if possible, should call dense_matrix instead
     def toarray(self):
         return self.dense_matrix()
 
+    # deprecate this if possible, should call sparse_matrix().tocsr()
     def tocsr(self):
         return sparse.csr_matrix(self.matrix)
 
@@ -92,9 +78,6 @@ class EkteloMatrix(LinearOperator):
             # note: this expects both matrix types to be compatible (e.g., sparse and sparse)
             # todo: make it work for different backing representations
             return EkteloMatrix(self.matrix @ other.matrix)
-        # todo: deprecate this if possible (shouldn't be allowed to multiply with scipy)
-        if sparse.compressed._cs_matrix in type(other).mro():
-            return EkteloMatrix(self.matrix * other)
         else:
             raise TypeError('incompatible type %s for multiplication with EkteloMatrix'%type(other))
             
@@ -104,6 +87,12 @@ class EkteloMatrix(LinearOperator):
         return NotImplemented
 
     def __getitem__(self, key):
+        """ 
+        return a given row from the matrix
+    
+        :param key: the index of the row to return
+        :return: a 1xN EkteloMatrix
+        """
         # row indexing, subclasses may provide more efficient implementation
         Q = self.matrix
         if sparse.issparse(Q):
