@@ -63,12 +63,13 @@ export EKTELO_LOG_LEVEL=DEBUG
 
 Various system-level packages are necessary to meet the requirements
 for third-party python modules installed during initialization. The
-dependencies vary by platform.
+dependencies vary by platform. It is **strongly recommended** to use
+python version 3.6 or higher.
 
 #### Ubuntu 16.04 Packages
 
 ```bash
-sudo apt-get install python3.4-venv gfortran liblapack-dev libblas-dev
+sudo apt-get install gfortran liblapack-dev libblas-dev
 sudo apt-get install libpq-dev python3-dev libncurses5-dev swig glpk
 ```
 
@@ -92,6 +93,12 @@ source $PYTHON_HOME/bin/activate
 cd $EKTELO_HOME
 pip install -r resources/requirements.txt
 ```
+
+Note: We recommend installing python modules with the same versions specified in
+`resources/requirements.txt`. However, if you are running python version greater 
+than 3.6, then it is possible that you will need to increase the module versions
+as well. This can be accomplished by replacing `==` with `>=` in the requirements
+file.
 
 The data must be downloaded into the `$EKTELO_DATA` folder.
 

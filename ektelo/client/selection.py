@@ -13,6 +13,7 @@ from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
 from ektelo import matrix, query_matrix
+from functools import reduce
 
 
 def flatten_measurements(m, dsize, sparse_flag = 1):
@@ -699,4 +700,21 @@ class AddEquiWidthIntervals(SelectionOperator):
         mat = sparse.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
         return matrix.EkteloMatrix(mat)
 
+class HDMarginal(SelectionOperator):
+
+    def __init__(self, domain_shape):
+        super(HDMarginal, self).__init__()
+
+        self.domain_shape = domain_shape
+
+    def select(self):
+        domain_shape = self.domain_shape
+        marginals = []
+        for ind,shape in enumerate(domain_shape):
+            queries = [np.ones(n) for n in domain_shape[:ind]] + [sparse.identity(shape)] + [np.ones(n) for n in domain_shape[ind+1:]]
+            queries = reduce(sparse.kron, queries)
+            marginals.append(queries)
+        strategy = sparse.vstack(marginals)
+
+        return strategy
 

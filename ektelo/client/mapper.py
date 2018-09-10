@@ -104,6 +104,13 @@ class Striped(MapperOperator):
 
         return support.combine_all(vectors).flatten()
 
+    def partitions(self):
+        vectors = [np.arange(dom, dtype=int) for dom in self.domain_size]
+        vectors[self.stripe_dim] = np.ones(self.domain_size[self.stripe_dim], dtype=int)
+
+        return vectors
+
+
 
 class HilbertTransform(MapperOperator):
     '''
@@ -280,18 +287,41 @@ class WorkloadBased(MapperOperator):
         # compressed = numpy.ascontiguousarray(mat).view(numpy.dtype((numpy.void, mat.dtype.itemsize * mat.shape[1])))  
 
         # http://www.ryanhmckenna.com/2017/01/efficiently-remove-duplicate-rows-from.html
-        v = numpy.random.rand(A.shape[0])
+        v = np.random.rand(A.shape[0])
         vA = A.T.dot(v)     
 
         # use numpy.unique
         # returned 'inverse' is the index of the unique value present in each position (this functions as a group id)
-        _u, index, inverse = numpy.unique(vA, return_index=True, return_inverse=True)   
+        _u, index, inverse = np.unique(vA, return_index=True, return_inverse=True)   
 
         if stable:
-            return support.canonical_ordering(_replace(inverse, index), canonical_order=True)
+            return support.canonical_ordering(support._replace(inverse, index))
         else:
-            return support.canonical_ordering( inverse, canonical_order=True)
+            return support.canonical_ordering(inverse)
     
     def mapping(self):
         return WorkloadBased.partition_lossless(self.W)
 
+
+class MarginalPartition(MapperOperator):
+    '''partition generator marginals of high dimensional data 
+    '''
+
+    def __init__(self, domain_shape, proj_dim=-1):
+        '''default partition: build histogram on the last dimension
+        '''
+        self.init_params = util.init_params_from_locals(locals())
+        self.proj_dim = proj_dim
+        self.domain_shape = domain_shape
+
+   
+    def mapping(self):
+
+        assert self.proj_dim<len(self.domain_shape), "proj_dim out of range"
+
+        margin_vec = [ np.array([1]*i) for i in self.domain_shape]
+
+        margin_vec[self.proj_dim] = np.arange(self.domain_shape[self.proj_dim]) # the projecting dimension
+
+
+        return support.combine_all(margin_vec).flatten()

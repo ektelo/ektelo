@@ -169,6 +169,20 @@ class DatasetFromRelation(Dataset, CartesianInstantiable):
         return d
 
 
+class DatasetFromFile(Dataset, CartesianInstantiable):
+
+    def __init__(self, fileName, reduce_to_dom_shape=None):
+        self.init_params = util.init_params_from_locals(locals())
+        self.fname = fileName
+
+        #assert nickname in filenameDict, 'Filename parameter not recognized: %s' % nickname
+        hist = load(self.fname)
+        super(DatasetFromFile,self).__init__(hist, reduce_to_dom_shape, None)
+
+    @staticmethod
+    def instantiate(params):
+        return DatasetFromFile(params['nickname'], params['domain'])
+        
 class DatasetSampled(Dataset):
 
     def __init__(self, dist, sample_to_scale, reduce_to_dom_shape=None, seed=None):

@@ -198,3 +198,4 @@ def Range2D(n):
 
 def Prefix2D(n):
     return Kronecker([Prefix(n), Prefix(n)]) 
+

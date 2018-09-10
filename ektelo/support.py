@@ -6,7 +6,7 @@ from functools import reduce
 import math
 import numpy as np
 from scipy import sparse
-
+from ektelo import workload
 
 def split_rectangle (x, b_h, b_v):
     """
@@ -61,7 +61,11 @@ def cantor_pairing(a, b):
     A function returning a unique positive integer for every pair (a,b) of positive integers
     """
     return (a+b)*(a+b+1)/2 + b
-
+    
+def _replace(vector, new_values):
+    for i in range(len(vector)):
+        vector[i] = new_values[ vector[i] ]
+    return vector
 
 def get_partition_vec(rank,n,cluster,closeRange=False):
     """ get the partition vector from clusters returned by partition algorithms
@@ -176,27 +180,6 @@ def canonical_ordering(mapping):
 def mapping_statistics(mapping):
     return np.unique(mapping, return_index=True, return_inverse=True, return_counts=True)   
 
-##############################################################
-# Transformation helpers
-##############################################################
-
-def project(mapping, idx, vector):
-    return projection_matrix(mapping, idx) * vector
-
-def unproject(mapping, idx, vector):
-    return vector * projection_matrix(mapping, idx)
-
-def reduce_data(mapping, data):
-    return expansion_matrix(mapping) * data
-
-def expand_data(mapping, data):
-    return reduction_matrix(mapping) * data
-
-def reduce_queries(mapping, queries):
-    return query * expansion_matrix(mapping) 
-
-def expand_queries(mapping, queries):
-    return queries * reduction_matrix(mapping)
 
 
 
@@ -330,3 +313,15 @@ def complement(A, grid_size=None):
         comp.append(q)
 
     return sparse.csr_matrix(comp)
+
+
+
+# When comparing with previous implementation with Workload from dpcomp_core
+#def get_matrix(W):
+#    return W.get_matrix() if isinstance(W, workload.Workload) \
+#            or isinstance(W, dpcomp_core.workload.Workload) else W
+
+def get_matrix(W):
+    ''' convient method to check and get workload matrix '''
+    return W.get_matrix() if isinstance(W, workload.Workload) else W
+    
