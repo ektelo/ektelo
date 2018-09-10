@@ -523,23 +523,22 @@ class MwemVariantB(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
         mult_weight = inference.MultiplicativeWeights()
 
-        measured_queries = []
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
-                                                  W_partial, 
+            worst_approx = pselection.WorstApprox(W,
+                                                  measuredQueries, 
                                                   x_hat, 
                                                   eps_round * self.ratio)
 
             W_next = worst_approx.select(x, prng)
+            measuredQueries.append(W_next.mwem_index)
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
-            W_partial += W_next
             laplace = measurement.Laplace(M, eps * (1-self.ratio) )
             y = laplace.measure(x, prng)
             x_hat = mult_weight.infer(M, y, x_hat)
@@ -558,20 +557,18 @@ class MwemVariantC(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
         nnls = inference.NonNegativeLeastSquares()
 
-        measured_queries = []
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()), 
-                                                  W_partial, 
+            worst_approx = pselection.WorstApprox(W, 
+                                                  measuredQueries,
                                                   x_hat, 
                                                   eps_round * self.ratio)
-            W_next = worst_approx.select(x, prng)
-            M = support.extract_M(W_next)
-            W_partial += W_next
+            M = worst_approx.select(x, prng)
+            measuredQueries.append(M.mwem_index)
             laplace = measurement.Laplace(M, eps * (1-self.ratio))
             y = laplace.measure(x, prng)
             x_hat = nnls.infer(M, y)
@@ -590,23 +587,22 @@ class MwemVariantD(Base):
     def Run(self, W, x, eps, seed):
         prng = np.random.RandomState(seed)
         x_hat = prng.rand(*x.shape)
-        W_partial = sparse.csr_matrix(W.get_matrix().shape)
         nnls = inference.NonNegativeLeastSquares()
 
-        measured_queries = []
+        measuredQueries = []
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            worst_approx = pselection.WorstApprox(sparse.csr_matrix(W.get_matrix()),
-                                                  W_partial, 
+            worst_approx = pselection.WorstApprox(W,
+                                                  measuredQueries,
                                                   x_hat, 
                                                   eps_round * self.ratio)
 
             W_next = worst_approx.select(x, prng)
+            measuredQueries.append(W_next.mwem_index)
             M = selection.AddEquiWidthIntervals(W_next, i).select()
 
-            W_partial += W_next
             laplace = measurement.Laplace(M, eps * (1-self.ratio) )
             y = laplace.measure(x, prng)
             x_hat = nnls.infer(M, y)

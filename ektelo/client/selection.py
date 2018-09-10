@@ -694,11 +694,12 @@ class AddEquiWidthIntervals(SelectionOperator):
     """
     def __init__(self, W, log_width):
         super(AddEquiWidthIntervals, self).__init__()
-        self.M_hat = support.extract_M(W)   # expects W to contain a single measurement
+        #self.M_hat = support.extract_M(W)   # expects W to contain a single measurement
+        self.M_hat = W.sparse_matrix()
         self.grid_size = min(2 ** log_width, self.M_hat.shape[1])
 
     def select(self):
-        mat = ektelo.math.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        mat = sparse.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
         return matrix.EkteloMatrix(mat)
 
 
