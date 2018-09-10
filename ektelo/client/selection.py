@@ -32,7 +32,7 @@ def flatten_measurements(m, dsize, sparse_flag = 1):
             M = sparse.csr_matrix(M)
         all_measurements.append(M)
     if sparse_flag == 1:
-        s = ektelo.math.vstack(all_measurements, format = 'csr')
+        s = sparse.vstack(all_measurements, format = 'csr')
     else:
         s = np.array(all_measurements)
 
@@ -80,43 +80,6 @@ def variance(N, b):
     return ( ((b - 1) * h**3) - (util.old_div((2 * (b+1) * h**2), 3)))
 
 
-def buildHierarchical_ios(n, b):
-    '''
-    Does the same with buildHierarchical with the following differences:
-        - Does not support different branching factors per level
-        - Supports domain sizes that are not powers of the branching factor
-    Note (ios): tested the equivalence between buildHierarchical_ios and buildHierarchical
-    on domain sizes in [2, 4, 8, ..., 8192] for b = 2. Both functions produce the same set of queries.
-    The new function is up to x4 faster.
-    '''
-    nodes       = {}
-    root        = list(range(n))
-    n_id        = 0
-    nodes[n_id] = root
-    pending     = [n_id]
-    cur_id      = 0
-
-    while len(pending) != 0:
-        # Pop an ID from pending
-        cur_id  = pending.pop()
-        node    = nodes[cur_id]
-        children = split_b_ways(node, b)
-        for child in children:
-            n_id         += 1
-            nodes[n_id]  = child
-            if len(child) > 1:
-                pending.append(n_id)
-    # Post process for the correct format
-    tree = list(nodes.values())
-    M = []
-    for node in tree:
-        m = np.zeros(n)
-        m[node] = 1
-        M.append(m)
-
-    return np.array(M).astype(int)
-
-
 def buildHierarchical_sparse(n, b):
     '''
     Builds a sparsely represented (csr_matrix) hierarchical matrix
@@ -128,7 +91,7 @@ def buildHierarchical_sparse(n, b):
     if n <= b:
         a = np.ones(n)
         b = sparse.identity(n, format='csr')
-        return ektelo.math.vstack([a, b])
+        return sparse.vstack([a, b])
 
     # n = mb + r where r < b
     # n = (m+1) r + m (b-r)
@@ -165,7 +128,7 @@ def buildHierarchical_sparse(n, b):
         right = sparse.csr_matrix((rows, n-end))
         res.append(hstack(left, hier0, right))
 
-    return ektelo.math.vstack(res, format='csr')
+    return sparse.vstack(res, format='csr')
 
 
 def find_best_branching(N):
@@ -324,7 +287,7 @@ class H2(SelectionOperator):
 
     """
 
-    def __init__(self, domain_shape, branching=2, matrix_form='sparse'):
+    def __init__(self, domain_shape, branching=2):
         super(H2, self).__init__()
 
         assert isinstance(domain_shape, tuple) and len(
@@ -338,8 +301,6 @@ class H2(SelectionOperator):
     def select(self):
         if self.domain_shape[0] == self.cache.shape[1]:
             h_queries = self.cache
-        elif self.matrix_form == 'dense':
-            h_queries = buildHierarchical_ios(self.domain_shape[0], self.branching)
         else:
             h_queries = buildHierarchical_sparse(self.domain_shape[0], self.branching)
 
@@ -620,7 +581,7 @@ class Wavelet(SelectionOperator):
         I2 = sparse.identity(m, format='csr')
         A = sparse.kron(H2, [1,1])
         B = sparse.kron(I2, [1,-1])
-        return ektelo.math.vstack([A,B])
+        return sparse.vstack([A,B])
 
     @staticmethod
     def remove_duplicates(a):
