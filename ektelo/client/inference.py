@@ -77,7 +77,6 @@ class ScalableInferenceOperator(InferenceOperator):
         assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
 
         A = matrix.VStack([M*(1.0/w) for M, w in zip(Ms, scale_factors)])
-        print(Ms, ys, scale_factors,[y/w for y, w in zip(ys, scale_factors)])
         y = np.concatenate([y/w for y, w in zip(ys, scale_factors)])
         
         return A, y

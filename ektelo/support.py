@@ -313,15 +313,3 @@ def complement(A, grid_size=None):
         comp.append(q)
 
     return sparse.csr_matrix(comp)
-
-
-
-# When comparing with previous implementation with Workload from dpcomp_core
-#def get_matrix(W):
-#    return W.get_matrix() if isinstance(W, workload.Workload) \
-#            or isinstance(W, dpcomp_core.workload.Workload) else W
-
-def get_matrix(W):
-    ''' convient method to check and get workload matrix '''
-    return W.get_matrix() if isinstance(W, workload.Workload) else W
-    

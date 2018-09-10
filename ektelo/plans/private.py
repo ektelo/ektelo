@@ -5,6 +5,7 @@ from ektelo import util
 from ektelo import math
 from ektelo.plans.common import Base
 from ektelo.wrapper import *
+from ektelo import workload
 
 class Identity(Base):
 
@@ -485,13 +486,13 @@ class MwemVariantB(Base):
             eps_round = eps / float(self.rounds)
 
             # SW + SH2
-            W_next = x.worst_approx(W,
+            M = x.worst_approx(W,
                                     measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio)
             
-            measuredQueries.append(W_next.mwem_index)
-            M = selection.AddEquiWidthIntervals(W_next, i).select()
+            measuredQueries.append(M.mwem_index)
+            M = selection.AddEquiWidthIntervals(M, i).select()
 
             y = x.laplace(M, eps_round * (1-self.ratio))
 
@@ -527,28 +528,29 @@ class MwemVariantC(Base):
         M_history = []
         y_history = []
         measuredQueries = []
+        noise_scales = []
 
+        if self.total_noise_scale != 0:
+                M_history.append(workload.Total(domain_size))
+                y_history.append(np.array([self.data_scale]))
+                noise_scales.append(self.total_noise_scale)
 
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
-            W_next = x.worst_approx(W,
-                                    measuredQueries,
-                                    x_hat,
-                                    eps_round * self.ratio)
+            M = x.worst_approx(W,
+                               measuredQueries,
+                               x_hat,
+                               eps_round * self.ratio)
             measuredQueries.append(M.mwem_index)
             y = x.laplace(M, eps_round * (1-self.ratio))
             
             # default use history
             M_history.append(M)
             y_history.append(y)
+            noise_scales.append(laplace_scale_factor(M, eps_round * (1-self.ratio)))
 
-            if self.total_noise_scale != 0:
-                total_query = sparse.csr_matrix([1]*domain_size)
-                noise_scale = laplace_scale_factor(M, eps_round * (1-self.ratio))
-                
-                x_hat = non_negative_least_squares([total_query, M_history], [[self.data_scale], y_history], [self.total_noise_scale, noise_scale])
-            else:
-                x_hat = non_negative_least_squares(M_history, y_history)
+
+            x_hat = non_negative_least_squares(M_history, y_history, noise_scales)
 
         return x_hat
 
@@ -574,16 +576,22 @@ class MwemVariantD(Base):
         M_history = []
         y_history = []
         measuredQueries = []
+        noise_scales = []
+
+        if self.total_noise_scale != 0:
+                M_history.append(workload.Total(domain_size))
+                y_history.append(np.array([self.data_scale]))
+                noise_scales.append(self.total_noise_scale)
 
         for i in range(1, self.rounds+1):
             eps_round = eps / float(self.rounds)
             # SW + SH2
-            W_next = x.worst_approx(W,
+            M = x.worst_approx(W,
                                     measuredQueries,
                                     x_hat,
                                     eps_round * self.ratio)
-            measuredQueries.append(W_next.mwem_index)
-            M = selection.AddEquiWidthIntervals(W_next, i).select()
+            measuredQueries.append(M.mwem_index)
+            M = selection.AddEquiWidthIntervals(M, i).select()
 
 
             y = x.laplace(M, eps_round * (1-self.ratio))
@@ -591,14 +599,9 @@ class MwemVariantD(Base):
             # default use history
             M_history.append(M)
             y_history.append(y)
+            noise_scales.append(laplace_scale_factor(M, eps_round * (1-self.ratio)))
 
-            if self.total_noise_scale != 0:
-                total_query = sparse.csr_matrix([1]*domain_size)
-                noise_scale = laplace_scale_factor(M, eps_round * (1-self.ratio))
-
-                x_hat = non_negative_least_squares([total_query, M_history], [[self.data_scale], y_history], [self.total_noise_scale, noise_scale])
-            else:
-                x_hat = non_negative_least_squares(M_history, y_history)
+            x_hat = non_negative_least_squares(M_history, y_history, noise_scales)
 
         return x_hat
 
