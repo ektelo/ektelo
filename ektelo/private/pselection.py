@@ -152,7 +152,7 @@ class PrivBayesSelect(SelectionOperator):
                 else:
                     print('bug here')
             M.append(reduce(sparse.kron, Q))
-        return math.vstack(M)
+        return sparse.vstack(M)
 
     @staticmethod
     def get_config_str(relation):
