@@ -294,7 +294,6 @@ class H2(SelectionOperator):
             domain_shape) == 1, 'Hierarchical selection only supports 1D and 2D domain shapes'
         assert branching > 1
         self.branching = branching
-        self.matrix_form = matrix_form
         self.domain_shape = domain_shape
         self.cache = np.ones((1, 1))
 
