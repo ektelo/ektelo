@@ -2,7 +2,6 @@ import numpy as np
 from scipy import sparse
 from ektelo import support
 from ektelo import util
-from ektelo import math
 from ektelo.plans.common import Base
 from ektelo.wrapper import *
 from ektelo import workload

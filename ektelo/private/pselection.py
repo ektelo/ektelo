@@ -3,7 +3,6 @@ import numpy as np
 import math
 from functools import reduce
 from scipy import sparse
-from ektelo import math
 from ektelo.matrix import EkteloMatrix
 from ektelo.operators import SelectionOperator
 from ektelo.algorithm.privBayes import privBayesSelect
