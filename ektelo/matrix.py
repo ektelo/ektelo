@@ -51,8 +51,8 @@ class EkteloMatrix(LinearOperator):
         # this implementation works for all subclasses too 
         # (as long as they define _matmat and _transpose)
         if axis == 0:
-            return self.dot(np.ones(self.shape[1]))
-        ans = self.T.dot(np.ones(self.shape[0]))  
+            return self.T.dot(np.ones(self.shape[0]))
+        ans = self.dot(np.ones(self.shape[1]))  
         return ans if axis == 1 else np.sum(ans)
 
     def _adjoint(self):
