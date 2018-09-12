@@ -36,52 +36,41 @@ def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
     xest[xest < 0] = 0.0
     return xest, info
 
-def eval_x(hatx, q):
-    """evaluation of a query in the form of t"""
-    # note(ryan): the need for float(.) was due to pathologies in sparse matrix behavior
-    # I think we can safely delete this with EkteloMatrix
-    return float(q.dot(hatx)) 
-
-def multWeightsUpdate(hatx, Q, Q_est, updateRounds = 1):
-    """ Multiplicative weights update, supporting multiple measurements and repeated update rounds
+def multWeightsUpdate(hatx, M, y, updateRounds = 1):
+    """ Multiplicative weights update
     hatx: starting estimate of database
-    Q: list of query arrays representing measurements
-    Q_est: list of corresponding answers to query
+    M: A query matrix representing measurements
+    y: array of corresponding answers to query
     updateRounds: number of times to repeat the update of _all_ provided queries
     """
-    assert Q.shape[0]==len(Q_est)
+    assert M.shape[0]==y.size
 
-    total = sum(hatx)
-
-    # TODO: this update rule shouldn't require materializing Q
-    Q = sparse.csr_matrix(Q.sparse_matrix())
+    total = np.sum(hatx)
 
     for i in range(updateRounds):
-        for q_est, q in zip(Q_est, Q):
-            error = q_est - eval_x(hatx,q)        # difference between query ans on current estimated data and the observed answer
-            update_vector = np.exp( q.toarray() * error / (2.0 * total) ).flatten()  # note that numpy broadcasting is happening here
-            hatx = hatx * update_vector
-            hatx = hatx * total / sum(hatx)     # normalize
+        for j in range(y.size):
+            error = y[j] - M[j].dot(hatx)
+            q = M[j].dense_matrix().flatten()
+            update_vector = np.exp(q * error / (2.0 * total))
+            hatx *= update_vector
+            hatx *= total / np.sum(hatx)
 
     return hatx
 
+def _apply_scales(Ms, ys, scale_factors):
+    if scale_factors is None:
+        if type(Ms) is list:
+            return matrix.VStack(Ms), np.concatenate(ys)
+        return Ms, ys
+    assert type(Ms) == list and type(ys) == list
+    assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
 
-class ScalableInferenceOperator(InferenceOperator):
+    A = matrix.VStack([M*(1.0/w) for M, w in zip(Ms, scale_factors)])
+    y = np.concatenate([y/w for y, w in zip(ys, scale_factors)])
+    
+    return A, y
 
-    def _apply_scales(self, Ms, ys, scale_factors):
-        if scale_factors is None:
-            if type(Ms) is list:
-                return matrix.VStack(Ms), np.concatenate(ys)
-            return Ms, ys
-        assert type(Ms) == list and type(ys) == list
-        assert len(Ms) > 0 and len(Ms) == len(ys) and len(ys) == len(scale_factors)
-
-        A = matrix.VStack([M*(1.0/w) for M, w in zip(Ms, scale_factors)])
-        y = np.concatenate([y/w for y, w in zip(ys, scale_factors)])
-        
-        return A, y
-
-class LeastSquares(ScalableInferenceOperator):
+class LeastSquares(InferenceOperator):
 
     def __init__(self, method='lsmr', l2_reg=0.0):
         super(LeastSquares, self).__init__()
@@ -96,39 +85,28 @@ class LeastSquares(ScalableInferenceOperator):
             2) Ms and ys are lists of M matrices and y vectors
                and scale_factors is a list of the same length.
         '''
-        A, y = self._apply_scales(Ms, ys, scale_factors)
+        A, y = _apply_scales(Ms, ys, scale_factors)
 
         if self.method == 'standard':
             assert self.l2_reg == 0, 'l2 reg not supported with method=standard'
             (x_est, _, rank, _) = linalg.lstsq(A.dense_matrix(), y, lapack_driver='gelsy')
         elif self.method == 'lsmr':
-            print(A.shape, y.shape)
             res = lsmr(A, y, atol=0, btol=0, damp=self.l2_reg)
             x_est = res[0]
         elif self.method == 'lsqr':
             res = lsqr(A, y, atol=0, btol=0, damp=self.l2_reg)
             x_est = res[0]
 
-        x_est = x_est.reshape(A.shape[1])  # reshape to match shape of x
-
         return x_est
 
-class NonNegativeLeastSquares(ScalableInferenceOperator):
+class NonNegativeLeastSquares(InferenceOperator):
     '''
     Non negative least squares (nnls)
     Note: undefined behavior when system is under-constrained
     '''
 
-    def __init__(self, lasso=None):
-        '''
-        :param lasso:
-            None for no regularization
-            True for regularization as determined by total estimate give by least squares
-            positive number for regularization strength (xest will have sum approximately equal to this number)
-        '''
+    def __init__(self):
         super(NonNegativeLeastSquares, self).__init__()
-
-        self.lasso = lasso
 
     def infer(self, Ms, ys, scale_factors=None):
         ''' Either:
@@ -137,15 +115,14 @@ class NonNegativeLeastSquares(ScalableInferenceOperator):
             2) Ms and ys are lists of M matrices and y vectors
                and scale_factors is a list of the same length.
         '''
-        A, y = self._apply_scales(Ms, ys, scale_factors)
+        A, y = _apply_scales(Ms, ys, scale_factors)
 
         x_est, info = nls_lbfgs_b(A, y)
 
-        x_est = x_est.reshape(A.shape[1])  # reshape to match shape of x
         return x_est
 
 
-class MultiplicativeWeights(ScalableInferenceOperator):
+class MultiplicativeWeights(InferenceOperator):
     '''
     Multiplicative weights update with multiple update rounds and optional history
     useHistory is no longer available inside the operator. To use history measurements,
@@ -163,7 +140,7 @@ class MultiplicativeWeights(ScalableInferenceOperator):
             2) Ms and ys are lists of M matrices and y vectors
                and scale_factors is a list of the same length.
         '''
-        M, y = self._apply_scales(Ms, ys, scale_factors)
+        M, y = _apply_scales(Ms, ys, scale_factors)
 
         """ mult_weights is an update method which works on the original domain"""
         assert x_est is not None, 'Multiplicative Weights update needs a starting xest, but there is none.'
@@ -172,7 +149,7 @@ class MultiplicativeWeights(ScalableInferenceOperator):
         return x_est
 
 
-class AHPThresholding(ScalableInferenceOperator):
+class AHPThresholding(InferenceOperator):
     '''
     Special update operator for AHP thresholding step.
     This operator assumes that the previous one is a Laplace measurement of the Identity workload.
@@ -192,7 +169,7 @@ class AHPThresholding(ScalableInferenceOperator):
             2) Ms and ys are lists of M matrices and y vectors
                and scale_factors is a list of the same length.
         '''
-        A, y = self._apply_scales(Ms, ys, scale_factors)
+        A, y = _apply_scales(Ms, ys, scale_factors)
 
         eps = eps_par * self.ratio
         x_est = lsmr(A, y.flatten())[0]
