@@ -4,15 +4,12 @@ from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
 from functools import reduce
 
-def _any_sparse(matrices):
-    return any(sparse.issparse(Q.matrix) for Q in matrices)
-
 class EkteloMatrix(LinearOperator):
     """
     An EkteloMatrix is a linear transformation that can compute matrix-vector products 
     """
     # must implement: _matmat, _transpose, matrix
-    # can  implement: gram, sensitivity, sum, dense_matrix, sparse_matrix, __abs__, __lstsqr__
+    # can  implement: gram, sensitivity, sum, dense_matrix, sparse_matrix, __abs__
 
     def __init__(self, matrix):
         """ Instantiate an EkteloMatrix from an explicitly represented backing matrix
@@ -57,24 +54,11 @@ class EkteloMatrix(LinearOperator):
             return self.dot(np.ones(self.shape[1]))
         ans = self.T.dot(np.ones(self.shape[0]))  
         return ans if axis == 1 else np.sum(ans)
-    
-    # deprecate this if possible, should call dense_matrix instead
-    def toarray(self):
-        return self.dense_matrix()
-
-    # deprecate this if possible, should call sparse_matrix().tocsr()
-    def tocsr(self):
-        return sparse.csr_matrix(self.matrix)
 
     def _adjoint(self):
         return self._transpose()
 
     def __mul__(self, other):
-        # GDB: I had to bring over my implementation because there are places
-        # in the plans where we use the "*" operator.
-        
-        # if other is a numpy array, simply call dot
-        # if other is an EkteloMatrix, otherwise perform multiplication
         if np.isscalar(other):
             return Weighted(self, other)
         if type(other) == np.ndarray:
@@ -128,16 +112,6 @@ class EkteloMatrix(LinearOperator):
     def __abs__(self):
         return EkteloMatrix(self.matrix.__abs__())
     
-    # RM: consider deprecating this
-    def __lstsqr__(self, y):
-        """
-        solve a least squares problem with this matrix.
-        For a matrix Q and a vector y, the least square solution is the vector x
-        such that || Qx - y ||_2 is minimized
-        """
-        # works for subclasses too
-        return lsqr(self, y)[0]
-
 class Identity(EkteloMatrix):
     def __init__(self, n, dtype=np.float64):
         self.n = n
@@ -160,9 +134,6 @@ class Identity(EkteloMatrix):
 
     def __abs__(self):  
         return self
-
-    def __lstsqr__(self, v):
-        return v
 
 class Ones(EkteloMatrix):
     """ A m x n matrix of all ones """
@@ -356,21 +327,5 @@ class Kronecker(EkteloMatrix):
     def __abs__(self):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
 
-    def __lstsqr__(self, v):
-        pass
-
-if __name__ == '__main__':
-    I = Identity(5)
-    T = Ones(1,5)
-    A = VStack([I,T])
-    G = A.gram()
-    print(G.matrix)
-    B = Kronecker([A,A])
-    print(B.shape)
-    print(B.gram(), B.T * B, B.T @ B)
-    print(B.dense_matrix().sum())
-    X = EkteloMatrix(np.random.rand(25,36))
-    Y = X * B
-    print(Y.shape, type(B), type(X), type(Y))
-    Z = B * X
-    print(Z.shape, type(Z))
+def _any_sparse(matrices):
+    return any(sparse.issparse(Q.matrix) for Q in matrices)

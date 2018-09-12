@@ -275,7 +275,6 @@ def combine_all(mappings):
     """ Returns an ndarray with each dimension corresponding to one
         of mapping.
     """
-    # Note(ryan): test to make sure combine is associative
     return reduce(combine, mappings, np.ones((), dtype=int))
 
 

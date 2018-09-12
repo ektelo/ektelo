@@ -76,7 +76,7 @@ class WorstApprox(SelectionOperator):
             index = exponentialMechanism(scores, 1.0, self.eps, prng, self.measuredQueries)
 
         ans = self.W[index]
-        ans.mwem_index = index # Note(ryan): a bit of a hack, try to fix in the future 
+        ans.mwem_index = index 
         return ans
 
 

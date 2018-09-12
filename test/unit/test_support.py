@@ -38,14 +38,14 @@ class TestSupport(unittest.TestCase):
                                       np.array([0,1,2,3,4,0,3,2,1,4]))
 
     def test_reduction_matrix(self):
-        M = support.reduction_matrix(self.mapping).toarray()
+        M = support.reduction_matrix(self.mapping).dense_matrix()
 
         self.assertEqual(M.shape, (5,10))
         np.testing.assert_array_equal(np.nonzero(M)[1],
                                       np.array([0,5,3,6,4,9,1,8,2,7]))
 
     def test_expansion_matrix(self):
-        M = support.expansion_matrix(self.mapping).toarray()
+        M = support.expansion_matrix(self.mapping).dense_matrix()
 
         self.assertEqual(M.shape, (10,5))
         np.testing.assert_array_equal(np.nonzero(M)[1], self.mapping)
@@ -54,11 +54,11 @@ class TestSupport(unittest.TestCase):
         R = support.reduction_matrix(self.mapping)
         E = support.expansion_matrix(self.mapping)
         
-        np.testing.assert_array_equal((R*E).toarray(), np.eye(5))
+        np.testing.assert_array_equal((R*E).dense_matrix(), np.eye(5))
 
     def test_partition_matrix(self):
         idx = 1
-        M = support.projection_matrix(self.mapping, idx).toarray()
+        M = support.projection_matrix(self.mapping, idx).dense_matrix()
 
         np.testing.assert_array_equal(np.nonzero(M)[1],
                                       np.arange(10)[self.mapping==idx])

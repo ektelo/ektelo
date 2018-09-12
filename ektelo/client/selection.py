@@ -12,7 +12,7 @@ import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
-from ektelo import matrix, query_matrix
+from ektelo import matrix, workload
 from functools import reduce
 
 
@@ -273,7 +273,7 @@ class Total(SelectionOperator):
         self.domain_shape = domain_shape
 
     def select(self):
-        return query_matrix.Total(self.domain_shape[0])
+        return workload.Total(self.domain_shape[0])
         #return np.ones((1, self.domain_shape[0]), dtype=np.float)
 
 
