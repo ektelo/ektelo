@@ -36,6 +36,27 @@ def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
     xest[xest < 0] = 0.0
     return xest, info
 
+def multWeightsFast(hatx, M, y, updateRounds = 1):
+    """ Multiplicative weights update
+    hatx: starting estimate of database
+    M: A query matrix representing measurements
+    y: array of corresponding answers to query
+    updateRounds: number of times to repeat the update of _all_ provided queries
+
+    NOTE: this implementation is more efficient that multWeightsUpdate, and exploits
+    possible matrix-free representation of measuremetns more effectively
+    However, results may be slightly different than multWeightsUpdate
+    """
+    assert M.shape[0]==y.size
+    total = np.sum(hatx)
+
+    for i in range(updateRounds):
+        error = y - M.dot(hatx)
+        hatx *= np.exp(M.T.dot(error) / (2.0*total))
+        hatx *= total / np.sum(hatx)
+
+    return hatx
+
 def multWeightsUpdate(hatx, M, y, updateRounds = 1):
     """ Multiplicative weights update
     hatx: starting estimate of database

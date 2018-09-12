@@ -194,12 +194,11 @@ class Mwem(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
-        # Note(ryan): try to fix up this implementation to not explicitly materialize the matrix W
         x = x.flatten()
         prng = np.random.RandomState(seed)
         domain_size = np.prod(self.domain_shape)
 
-        # Start with a unifrom estimation of x
+        # Start with a uniform estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
 
 
