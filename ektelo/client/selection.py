@@ -39,39 +39,6 @@ def flatten_measurements(m, dsize, sparse_flag = 1):
     return s
 
 
-def rect_to_quads(x):
-    '''
-    Given an np array it splits it correctly to 4 quads in the midpoints
-    can handle arrays of arbitrary shape (1D as well)
-    '''
-
-    n_rows = x.shape[0]
-    n_cols = x.shape[1]
-    # If ncol is odd, do vert splits in balanced manner
-    col_parity = 0
-    if n_cols % 2:
-        col_parity = 1
-    col_midpoint = util.old_div(x.shape[1],2)
-    row_midpoint = util.old_div(x.shape[0],2)
-
-    if x.shape[0] == 1:
-        # if x has only one row then do only vertical split
-        x1, x2 = np.split(x, [col_midpoint], axis = 1)
-        return [x1, x2]
-
-    if x.shape[1] == 1:
-        # if x has only one col then do only horizontal split
-        x1, x2 = np.split(x, [row_midpoint], axis = 0)
-        return [x1, x2]
-
-    # o/w do both splits
-    x_h1, x_h2 = np.split(x, [row_midpoint], axis = 0)
-    x1, x2 = np.split(x_h1,  [col_midpoint], axis = 1)
-    x3, x4 = np.split(x_h2,  [col_midpoint + col_parity], axis = 1)
-
-    return [x1, x2, x3, x4]
-
-
 def variance(N, b):
     '''Computes variance given domain of size N
     and branchng factor b.  Equation 3 from paper.'''
@@ -177,35 +144,6 @@ def Hb2D(n, m, b_h, b_v, sparse = 1):
 
     return M
 
-
-def quadtree(n, m, sparse = 1):
-    ''' Quadtree function, accepts a shape (n, m)
-        and returns a set of measurements in sparse format on the expanded x vector
-        n and m can be arbitrary numbers
-        sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
-    '''
-    dsize = n * m
-    x = np.arange(dsize)
-    x = x.reshape(n,m)
-
-    # Avoid doing recursion, python is notoriously bad at it
-    pending        = [x]
-    measurement_coo = [x]
-    while len(pending) != 0:
-        cur_quad = pending.pop()
-
-        # if it's a leaf then we don't want to split it anymore
-        if cur_quad.shape[0] * cur_quad.shape[1] > 1:
-            sub_quads = rect_to_quads(cur_quad)
-            for quad in sub_quads:
-                measurement_coo.append(quad)
-                pending.append(quad)
-
-    # Flatten the measurements to correspond to the flattened x vector
-    M = flatten_measurements(measurement_coo, dsize, sparse)
-
-    return M
 
 
 def GenerateCells(n,m,num1,num2,grid):
@@ -446,15 +384,75 @@ class GreedyH(SelectionOperator):
 
 class QuadTree(SelectionOperator):
 
-    def __init__(self, domain_shape, sparse_flag=1):
+    def __init__(self, domain_shape):
         super(QuadTree, self).__init__()
         assert isinstance(domain_shape, tuple) and len(
             domain_shape) == 2, "QuadTree selection only workss for 2D"
         self.domain_shape = domain_shape
-        self.sparse_flag = sparse_flag
+
+    @staticmethod
+    def rect_to_quads(rect_range):
+        '''
+        Given an rectangular domain represented using boarder cordinates (upper_left, lower_right),
+        it splits it correctly to 4 quads in the midpoints
+        '''
+        ul, lr = rect_range
+        upper, left =  ul
+        lower, right = lr   
+
+        n_rows = lower - upper + 1
+        n_cols = right - left + 1   
+
+        # If ncol is odd, do vert splits in balanced manner
+        col_parity = 0
+        if n_cols % 2:
+            col_parity = 1
+        col_midpoint = left + util.old_div(n_cols, 2)
+        row_midpoint = upper + util.old_div(n_rows, 2)  
+
+        if n_rows == 1:
+            # if x has only one row then do only vertical split
+            row = lr[0]
+            return [(ul, (row, col_midpoint - 1)), ((row, col_midpoint), lr) ]  
+
+        if n_cols == 1:
+            # if x has only one col then do only horizontal split
+            col = lr[1]
+            return [(ul, (row_midpoint - 1, col)), ((row_midpoint, col), lr) ]  
+
+        # o/w do both splits
+        q1 = (ul,                                        (row_midpoint - 1, col_midpoint - 1))
+        q2 = ((upper, col_midpoint),                     (row_midpoint - 1, right) )
+        q3 = ((row_midpoint, left),                      (lower, col_midpoint - 1 + col_parity))
+        q4 = ((row_midpoint, col_midpoint + col_parity), lr)    
+
+        return [q1, q2, q3, q4]
+
+    @staticmethod
+    def quadtree(n, m):
+        ''' Quadtree function, accepts a shape (n, m)
+            and returns a set of measurements in sparse format on the expanded x vector
+            n and m can be arbitrary numbers
+        '''
+        # Avoid doing recursion, python is notoriously bad at it
+        full_quad = ((0, 0), (n - 1, m - 1))
+        pending        = [full_quad]
+        selected_quads = [full_quad]    
+
+        while len(pending) != 0:
+            cur_quad = pending.pop()
+            # if it's a leaf then we don't want to split it anymore
+            if (cur_quad[1][0] - cur_quad[0][0] + 1) * (cur_quad[1][1] - cur_quad[0][1] + 1)  > 1:
+            
+                sub_quads = QuadTree.rect_to_quads(cur_quad)
+                selected_quads.extend(sub_quads)
+                pending.extend(sub_quads)   
+
+        M = workload.RangeQueries((n,m), selected_quads)
+        return M
 
     def select(self):
-        strategy = quadtree(self.domain_shape[0], self.domain_shape[1], self.sparse_flag)
+        strategy = QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])
         return matrix.EkteloMatrix(strategy)
 
 
