@@ -97,7 +97,7 @@ def split_rectangle(rect_range, b_h, b_v):
     """
     Split rectangular domain into grids according to branching factors
     Input and output ranges represented as corner coordinates (inclusive)
-    For use with Hb2D
+    For use with Hb2D, Ugird and Agrid
     """
     ul, lr = rect_range
     upper, left =  ul
@@ -180,29 +180,6 @@ def GenerateCells(n,m,num1,num2,grid):
     return cells
 
 
-def cells_to_query(cells,domain):
-    '''
-    helper function
-    :param cells: UGrid cells represented as upper-left and lower-right coordinates(inclusive range)
-    :param domain: tuple indicating the domain of queries.
-    :return: workload represented as a sparse matrix, each row is a query with the flattened domain.
-    '''
-    query_number = len(cells)
-    domain_size = np.prod(domain)
-    ans = sparse.lil_matrix((query_number, domain_size))
-
-    query_no = 0
-    for ul,lr in cells:
-        up, left = ul; low, right = lr
-        for row in range(up,low+1):
-            begin, end = np.ravel_multi_index([[row,row],[left,right]],domain)
-            ans[query_no, begin:end+1] = [1]*(end-begin+1)
-        query_no+=1
-
-    # convert to csr format for fast arithmetic and matrix vector operations
-    return ans.tocsr() 
-
-
 class Identity(SelectionOperator):
 
     def __init__(self, domain_shape):
@@ -266,14 +243,13 @@ class HB(SelectionOperator):
     Add hierarchical queries with optimal branching factor, per Qardaji et al.
     '''
 
-    def __init__(self, domain_shape, sparse_flag=1):
+    def __init__(self, domain_shape):
         super(HB, self).__init__()
 
         assert (isinstance(domain_shape, tuple) and len(domain_shape) == 1
                 or len(domain_shape) == 2
                 ), 'HB selection only supports 1D and 2D domain shapes'
         self.domain_shape = domain_shape
-        self.sparse_flag = sparse_flag
 
     def select(self):
         if len(self.domain_shape) == 1:
@@ -289,9 +265,8 @@ class HB(SelectionOperator):
             h_queries = Hb2D(self.domain_shape[0], 
                              self.domain_shape[1],
                              branching, 
-                             branching, 
-                             self.sparse_flag)
-        return matrix.EkteloMatrix(h_queries)
+                             branching)
+        return h_queries
 
 
 class GreedyH(SelectionOperator):
@@ -468,9 +443,7 @@ class QuadTree(SelectionOperator):
         return M
 
     def select(self):
-        strategy = QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])
-        return matrix.EkteloMatrix(strategy)
-
+        return QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])
 
 class UniformGrid(SelectionOperator):
 
@@ -516,11 +489,9 @@ class UniformGrid(SelectionOperator):
         num1 = int(util.old_div((n - 1), grid) + 1)
         num2 = int(util.old_div((m - 1), grid) + 1)
 
-        # TODO: potential optimization if grid ==1 identity workload
-        cells = GenerateCells(n, m, num1, num2, grid)
-        ans = cells_to_query(cells, (n, m))
+        cells = split_rectangle(((0,0), (n - 1, m - 1)), num1, num2)
 
-        return matrix.EkteloMatrix(ans)
+        return workload.RangeQueries((n, m), cells)
 
 class AdaptiveGrid(SelectionOperator):
 
@@ -542,7 +513,7 @@ class AdaptiveGrid(SelectionOperator):
         if shape == (1, 1):
             # skip the calucation of newgrids if shape is of size 1
             mymatrix = sparse.csr_matrix(([1], ([0], [0])), shape=(1, 1))
-            newgrid = 1
+            return matrix.EkteloMatrix(mymatrix)
 
         else:
             eps = self.eps_par
@@ -560,11 +531,11 @@ class AdaptiveGrid(SelectionOperator):
                 newgrid = 1
             num1 = int(util.old_div((nn - 1), newgrid) + 1)
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
-            # generate cell and pending queries base on new celss
-            cells = GenerateCells(nn, mm, num1, num2, newgrid)
-            mymatrix = cells_to_query(cells, (nn, mm))
 
-        return matrix.EkteloMatrix(mymatrix)
+            # generate cell and pending queries base on new grid size
+            cells = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
+            
+        return workload.RangeQueries((nn, mm), cells)
 
 class Wavelet(SelectionOperator):
     '''
