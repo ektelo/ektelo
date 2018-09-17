@@ -8,54 +8,6 @@ import numpy as np
 from scipy import sparse
 from ektelo import workload
 
-def split_rectangle (x, b_h, b_v):
-    """
-    Check if the quadtree produces a measurement set of correct size
-    For use with Hb2D
-    """
-    n_rows = x.shape[0]
-    n_cols = x.shape[1]
-
-    # if equally divisible then b_{v,h} is the number of split points for each dimension
-    h_split = b_h
-    v_split = b_v
-
-    # otherwise create the list of splitpoints
-    if n_rows % b_h != 0:
-        new_hsize = np.divide(n_rows, b_h, dtype = float)
-        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
-
-    if n_cols % b_v != 0:
-        new_vsize = np.divide(n_cols, b_v, dtype = float)
-        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
-
-    if b_h > n_rows:
-        h_split = n_rows
-    if b_v > n_cols:
-        v_split = n_cols
-    # if x has only one row then do only vertical split
-    if x.shape[0] == 1:
-        final_rects = np.split(x, v_split, axis = 1)
-
-        return final_rects
-
-    # if x has only one col then do only horizontal split
-    if x.shape[1] == 1:
-        final_rects = np.split(x, h_split, axis = 0)
-
-        return final_rects
-
-    # o/w do both splits
-    final_rects = []
-    h_rects = np.split(x, h_split, axis = 0)
-    for h_rect in h_rects:
-        v_rects = np.split(h_rect,  v_split, axis = 1)
-        for v_rect in v_rects:
-            final_rects.append(v_rect)
-
-    return final_rects
-
-
 def cantor_pairing(a, b):
     """
     A function returning a unique positive integer for every pair (a,b) of positive integers

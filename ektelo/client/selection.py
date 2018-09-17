@@ -16,29 +16,6 @@ from ektelo import matrix, workload
 from functools import reduce
 
 
-def flatten_measurements(m, dsize, sparse_flag = 1):
-    ''' Given a list of coordinates (each row corresponds to one query)
-        it returns a set of measurements in the desired format.
-        sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
-    '''
-    all_measurements = []
-
-    for measurement in m:
-        M = np.zeros(dsize).astype(np.int8)
-        flat_indices = measurement.flatten()
-        M[flat_indices] = 1
-        if sparse_flag == 1:
-            M = sparse.csr_matrix(M)
-        all_measurements.append(M)
-    if sparse_flag == 1:
-        s = sparse.vstack(all_measurements, format = 'csr')
-    else:
-        s = np.array(all_measurements)
-
-    return s
-
-
 def variance(N, b):
     '''Computes variance given domain of size N
     and branchng factor b.  Equation 3 from paper.'''
@@ -116,32 +93,71 @@ def find_best_branching(N):
     return min_b
 
 
-def Hb2D(n, m, b_h, b_v, sparse = 1):
+def split_rectangle(rect_range, b_h, b_v):
+    """
+    Split rectangular domain into grids according to branching factors
+    Input and output ranges represented as corner coordinates (inclusive)
+    For use with Hb2D
+    """
+    ul, lr = rect_range
+    upper, left =  ul
+    lower, right = lr   
+    n_rows = lower - upper + 1
+    n_cols = right - left + 1  
+
+    # if equally divisible then b_{v,h} is the number of split points for each dimension
+    h_split = b_h
+    v_split = b_v
+
+    # otherwise create the list of splitpoints
+    if n_rows % b_h != 0:
+        new_hsize = np.divide(n_rows, b_h, dtype = float)
+        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
+
+    if n_cols % b_v != 0:
+        new_vsize = np.divide(n_cols, b_v, dtype = float)
+        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
+
+    if b_h > n_rows:
+        h_split = n_rows
+    if b_v > n_cols:
+        v_split = n_cols
+
+    # build splitting points along each dimension
+    grid_v = np.split(np.arange(upper,lower + 1), h_split)
+    grid_h = np.split(np.arange(left, right + 1), v_split)
+
+    boarder_h = [(i.min(),i.max()) for i in grid_h]
+    boarder_v = [(i.min(),i.max()) for i in grid_v]
+
+    final_ranges = [((i[0], j[0]), (i[1], j[1])) for i in boarder_v for j in boarder_h] 
+
+    return final_ranges
+
+
+
+def Hb2D(n, m, b_h, b_v):
     ''' Implementation of Hb for 2D histograms
             (n,m): the shape of x
             b_v, b_h = the vertical and horizontal branching factorr respectively
-            sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
     '''
-    dsize = n * m
-    x = np.arange(dsize).reshape(n, m)
 
     # Avoid doing recursion, python is notoriously bad at it
-    pending         = [x]
-    measurement_coo = []
+    full_rect = ((0, 0), (n - 1, m - 1)) #inclusive ranges
+    pending        = [full_rect]
+    selected_rects = []
+
     while len(pending) != 0:
         cur_rect = pending.pop()
+
         # if it's a leaf then we don't want to split it anymore
-        if cur_rect.shape[0] * cur_rect.shape[1] > 1:
-            # split the current rectangle to rectangles according to the branching factors
-            sub_rects = support.split_rectangle(cur_rect, b_v, b_h)
-            for rect in sub_rects:
-                measurement_coo.append(rect)
-                pending.append(rect)
+        if (cur_rect[1][0] - cur_rect[0][0] + 1) * (cur_rect[1][1] - cur_rect[0][1] + 1)  > 1:
+            
+                sub_rects = split_rectangle(cur_rect, b_h, b_v)
+                selected_rects.extend(sub_rects)
+                pending.extend(sub_rects)   
 
-    # Flatten the measurements to correspond to the flattened x vector
-    M = flatten_measurements(measurement_coo, dsize, sparse)
-
+    M = workload.RangeQueries((n,m), selected_rects)
     return M
 
 
