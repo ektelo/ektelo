@@ -288,14 +288,12 @@ class Kronecker(EkteloMatrix):
         self.shape = tuple(np.prod([Q.shape for Q in matrices], axis=0))
         self.dtype = matrices[0].dtype
 
-    def _matvec(self, v):
-        size = self.shape[1]
-        X = v
+    def _matmat(self, V):
+        X = V
         for Q in self.matrices[::-1]:
-            m, n = Q.shape
-            X = Q @ X.reshape(size//n, n).T
-            size = size * m // n
-        return X.flatten()
+            m,n = Q.shape
+            X = Q @ X.reshape(-1, n).T
+        return X.reshape(self.shape[0], -1)
 
     def _transpose(self):
         return Kronecker([Q.T for Q in self.matrices]) 
@@ -326,6 +324,24 @@ class Kronecker(EkteloMatrix):
  
     def __abs__(self):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
+
+class _LazyProduct(EkteloMatrix):
+    def __init__(self, A, B):
+        self._A = A
+        self._B = B
+
+    def _matmat(self, X):
+        return self._A.dot(self._B.dot(X))
+
+    def _transpose(self):
+        return _LazyProduct(self._B.T, self._A.T)
+
+    @property
+    def matrix(self):
+        return self._A.matrix @ self._B.matrix
+
+    def gram(self):
+        return _LazyProduct(self.T, self)
 
 def _any_sparse(matrices):
     return any(sparse.issparse(Q.matrix) for Q in matrices)
