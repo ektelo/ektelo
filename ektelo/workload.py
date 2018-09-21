@@ -158,7 +158,7 @@ class RandomRange(RangeQueries):
             else:
                 shape = shape_list[np.random.randint(len(shape_list))]
             lb = tuple(prng.randint(0, d - q + 1, None) for d,q in zip(domain, shape))
-            ub = tuple(sum(x)+1 for x in zip(lb, shape))
+            ub = tuple(sum(x)-1 for x in zip(lb, shape))
             queries.append( (lb, ub) )
 
         super(RandomRange, self).__init__(domain, queries) 
