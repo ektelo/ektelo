@@ -8,20 +8,20 @@ from scipy import sparse
 import ektelo
 from ektelo import util
 from ektelo.operators import InferenceOperator
+import cvxopt
 
-def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
+def nnls(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
     """
     Solves the NNLS problem min || Ax - y || s.t. x >= 0 using gradient-based optimization
     :param A: numpy matrix, scipy sparse matrix, or scipy Linear Operator
     :param y: numpy vector
     """
-    M = sparse.linalg.aslinearoperator(A)
 
     def loss_and_grad(x):
-        diff = M.matvec(x) - y
+        diff = A.dot(x) - y
         res = 0.5 * np.sum(diff ** 2)
         f = res + l1_reg*np.sum(x) + l2_reg*np.sum(x**2)
-        grad = M.rmatvec(diff) + l1_reg + l2_reg*x
+        grad = A.T.dot(diff) + l1_reg + l2_reg*x
 
         return f, grad
 
@@ -35,6 +35,22 @@ def nls_lbfgs_b(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
                                                 m=1)
     xest[xest < 0] = 0.0
     return xest, info
+
+def nnl1(A, y):
+    M, N = A.shape
+    c = cvxopt.matrix(np.append(np.zeros(N), np.ones(M)))
+    h = cvxopt.matrix(np.hstack([y, -y, np.zeros(N)]))
+    A = A.sparse_matrix().tocoo()
+    
+    data = np.hstack([A.data, np.ones(M), -A.data, np.ones(M), np.ones(N)])
+    row = np.hstack([A.row, np.arange(M), M+A.row, np.arange(M, 2*M), np.arange(2*M, 2*M+N)])
+    col = np.hstack([A.col, np.arange(N, N+M), A.col, np.arange(N, N+M), np.arange(N)])
+    shape = (2*M+N, N+M)
+    
+    G = cvxopt.spmatrix(data, row, col, shape)
+    sol = cvxopt.solvers.lp(c, -G, -h)
+    x = np.array(sol['x'])[:N].flatten()
+    return np.maximum(x, 0)
 
 def multWeightsFast(hatx, M, y, updateRounds = 1):
     """ Multiplicative weights update
@@ -138,10 +154,31 @@ class NonNegativeLeastSquares(InferenceOperator):
         '''
         A, y = _apply_scales(Ms, ys, scale_factors)
 
-        x_est, info = nls_lbfgs_b(A, y)
+        x_est, info = nnls(A, y)
 
         return x_est
 
+class WorkloadNonNegativeLeastSquares(InferenceOperator):
+    
+    def __init__(self, W):
+        self.W = W
+        super(WorkloadNonNegativeLeastSquares, self).__init__()
+
+    def infer(self, Ms, ys, scale_factors=None):
+        A, y = _apply_scales(Ms, ys, scale_factors)
+        x_ls = lsqr(A, y)[0]
+        x_wnnls, info = nnls(self.W, self.W.dot(x_ls)) 
+        return x_wnnls
+
+class NonNegativeLeastAbsoluteDeviations(InferenceOperator):
+    
+    def __init__(self):
+        super(NonNegativeLeastAbsoluteDeviations, self).__init__()
+    
+    def infer(self, Ms, ys, scale_factors=None):
+        A, y = _apply_scales(Ms, ys, scale_factors)
+        x = nnl1(A, y)
+        return x
 
 class MultiplicativeWeights(InferenceOperator):
     '''
