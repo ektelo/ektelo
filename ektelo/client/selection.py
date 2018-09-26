@@ -111,11 +111,11 @@ def split_rectangle(rect_range, b_h, b_v):
 
     # otherwise create the list of splitpoints
     if n_rows % b_h != 0:
-        new_hsize = np.divide(n_rows, b_h, dtype = float)
+        new_hsize = np.divide(float(n_rows), b_h)
         h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
 
     if n_cols % b_v != 0:
-        new_vsize = np.divide(n_cols, b_v, dtype = float)
+        new_vsize = np.divide(float(n_cols), b_v)
         v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
 
     if b_h > n_rows:
@@ -124,15 +124,17 @@ def split_rectangle(rect_range, b_h, b_v):
         v_split = n_cols
 
     # build splitting points along each dimension
-    grid_v = np.split(np.arange(upper,lower + 1), h_split)
-    grid_h = np.split(np.arange(left, right + 1), v_split)
+    grid_h = np.split(np.arange(upper,lower + 1), h_split)
+    grid_v = np.split(np.arange(left, right + 1), v_split)
 
     boarder_h = [(i.min(),i.max()) for i in grid_h]
     boarder_v = [(i.min(),i.max()) for i in grid_v]
 
-    final_ranges = [((i[0], j[0]), (i[1], j[1])) for i in boarder_v for j in boarder_h] 
+    print(h_split, boarder_h)
+    final_ranges = [((i[0], j[0]), (i[1], j[1])) for i in boarder_h for j in boarder_v] 
 
     return final_ranges
+
 
 
 
@@ -159,8 +161,6 @@ def Hb2D(n, m, b_h, b_v):
 
     M = workload.RangeQueries((n,m), selected_rects)
     return M
-
-
 
 def GenerateCells(n,m,num1,num2,grid):
     # this function used to generate all the cells in UGrid
@@ -489,9 +489,11 @@ class UniformGrid(SelectionOperator):
         num1 = int(util.old_div((n - 1), grid) + 1)
         num2 = int(util.old_div((m - 1), grid) + 1)
 
-        cells = split_rectangle(((0,0), (n - 1, m - 1)), num1, num2)
+        cells = GenerateCells(n, m, num1, num2, grid)
 
         return workload.RangeQueries((n, m), cells)
+
+
 
 class AdaptiveGrid(SelectionOperator):
 
@@ -532,10 +534,11 @@ class AdaptiveGrid(SelectionOperator):
             num1 = int(util.old_div((nn - 1), newgrid) + 1)
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
 
-            # generate cell and pending queries base on new grid size
+            # generate cell and pending queries base on new celss
             cells = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
             
         return workload.RangeQueries((nn, mm), cells)
+
 
 class Wavelet(SelectionOperator):
     '''
