@@ -292,7 +292,7 @@ class Kronecker(EkteloMatrix):
         X = V
         for Q in self.matrices[::-1]:
             m,n = Q.shape
-            X = Q @ X.reshape(-1, n).T
+            X = Q.dot(X.reshape(-1, n).T)
         return X.reshape(self.shape[0], -1)
 
     def _transpose(self):
