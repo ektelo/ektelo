@@ -1,3 +1,4 @@
+from ektelo import matrix
 from ektelo.matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker
 import collections
 import itertools
@@ -108,31 +109,71 @@ class AllRange(EkteloMatrix):
         X = np.outer(r, r[::-1])
         return EkteloMatrix(np.minimum(X, X.T))
 
-class RangeQueries(EkteloMatrix):
+class RangeQueries(matrix._LazyProduct):
     """
     This class can represent a workload of range queries, which are provided as input
-    to the constructor as a list of pairs.
+    to the constructor.
     """
-    def __init__(self, domain, ranges, dtype=np.float64):
+    def __init__(self, domain, lower, higher, dtype=np.float64):
         """
-        :param domain: the domain size, as an int for 1D or tuple for nD domains
-        :param ranges: a list of range queries, represented as a pair (lower bound, upper bound)
-            where each bound is a tuple with the same size as domain.
+        :param domain: the domain size, as an int for 1D or tuple for d-dimensional 
+            domains where each bound is a tuple with the same size as domain.
+        :param lower: a q x d array of lower boundaries for the q queries
+        :param higher: a q x d array of upper boundareis for the q queries
         """
+        assert lower.shape == higher.shape, 'lower and higher must have same shape'
+        assert np.all(lower <= higher), 'lower index must be <= than higher index'
+        
         if type(domain) is int:
             domain = (domain,)
-            ranges = [( (lb,),  (ub,) ) for lb, ub in ranges]
+            lower = lower[:,None]
+            higher = higher[:,None]
         self.domain = domain
-        self.ranges = ranges
-        self.shape = (len(ranges), np.prod(domain))
+        self.shape = (lower.shape[0], np.prod(domain))
         self.dtype = dtype
+        self._lower = lower
+        self._higher = higher
 
+        idx = np.arange(np.prod(domain)).reshape(domain)
+        corners = np.array(list(itertools.product(*[(False,True)]*len(domain))))
+        row_ind = []
+        col_ind = []
+        data = []
+        queries = np.arange(lower.shape[0])
+        for corner in corners:
+            tmp = np.where(corner, lower-1, higher)
+            keep = np.all(tmp >= 0, axis=1)
+            index = idx[tuple(tmp.T)]
+            coef = np.sum(corner)%2 * 2 - 1
+            row_ind.append(queries[keep])
+            col_ind.append(index[keep]) 
+            data.append(np.repeat(-coef, keep.sum()))
+        row_ind = np.concatenate(row_ind)
+        col_ind = np.concatenate(col_ind)
+        data = np.concatenate(data)
+        self._transformer = sparse.csr_matrix((data, (row_ind, col_ind)), self.shape, dtype)
+
+        P = Kronecker([Prefix(n) for n in domain])
+        T = EkteloMatrix(self._transformer)
+        matrix._LazyProduct.__init__(self, T, P)
+
+    @staticmethod
+    def fromlist(domain, ranges, dtype=np.float64):
+        """ create a matrix of range queries from a list of (lower, upper) pairs
+        
+        :param domain: the domain of the range queries
+        :param ranges: a list of (lower, upper) pairs, where 
+            lower and upper are tuples with same size as domain
+        """
+        lower, higher = np.array(ranges).transpose([1,0,2])
+        return RangeQueries(domain, lower, higher, dtype)
+    
     @property
     def matrix(self):
         idx = np.arange(np.prod(self.domain), dtype=int).reshape(self.domain)
         row_ind = []
         col_ind = []
-        for i, (lb, ub) in enumerate(self.ranges):
+        for i, (lb, ub) in enumerate(zip(self._lower, self._higher)):
             s = tuple(slice(a,b+1) for a, b in zip(lb, ub))
             j = idx[s].flatten()
             col_ind.append(j)
@@ -140,28 +181,10 @@ class RangeQueries(EkteloMatrix):
         row_ind = np.concatenate(row_ind)
         col_ind = np.concatenate(col_ind)
         data = np.ones_like(row_ind)
-        return sparse.csr_matrix((data, (row_ind, col_ind)), self.shape)
+        return sparse.csr_matrix((data, (row_ind, col_ind)), self.shape, self.dtype)
 
-class RandomRange(RangeQueries):
-    def __init__(self, shape_list, domain, size, seed=9001):
-        if type(domain) is int:
-            domain = (domain,)
-        self.seed = seed
-        self.size = size
-
-        prng = np.random.RandomState(seed)
-        queries = []
-
-        for i in range(size):
-            if shape_list is None:
-                shape = tuple(prng.randint(1, dim+1, None) for dim in domain)
-            else:
-                shape = shape_list[np.random.randint(len(shape_list))]
-            lb = tuple(prng.randint(0, d - q + 1, None) for d,q in zip(domain, shape))
-            ub = tuple(sum(x)-1 for x in zip(lb, shape))
-            queries.append( (lb, ub) )
-
-        super(RandomRange, self).__init__(domain, queries) 
+    def __abs__(self):
+        return self
 
 class Marginal(Kronecker):
     def __init__(self, domain, binary):
@@ -183,6 +206,24 @@ class Marginals(VStack):
         for key, wgt in weights.items():
             if wgt > 0: subs.append(wgt * Marginal(domain, key))
         VStack.__init__(self, subs)   
+
+def RandomRange(shape_list, domain, size, seed=9001):
+    if type(domain) is int:
+        domain = (domain,)
+
+    prng = np.random.RandomState(seed)
+    queries = []
+
+    for i in range(size):
+        if shape_list is None:
+            shape = tuple(prng.randint(1, dim+1, None) for dim in domain)
+        else:
+            shape = shape_list[np.random.randint(len(shape_list))]
+        lb = tuple(prng.randint(0, d - q + 1, None) for d,q in zip(domain, shape))
+        ub = tuple(sum(x)-1 for x in zip(lb, shape))
+        queries.append( (lb, ub) )
+
+    return RangeQueries.fromlist(domain, queries) 
 
 def DimKMarginals(domain, dims):
     if type(dims) is int:

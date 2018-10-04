@@ -327,8 +327,11 @@ class Kronecker(EkteloMatrix):
 
 class _LazyProduct(EkteloMatrix):
     def __init__(self, A, B):
+        assert A.shape[1] == B.shape[0]
         self._A = A
         self._B = B
+        self.shape = (A.shape[0], B.shape[1])
+        self.dtype = A.dtype
 
     def _matmat(self, X):
         return self._A.dot(self._B.dot(X))

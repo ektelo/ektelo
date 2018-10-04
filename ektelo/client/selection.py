@@ -159,7 +159,7 @@ def Hb2D(n, m, b_h, b_v):
                 selected_rects.extend(sub_rects)
                 pending.extend(sub_rects)   
 
-    M = workload.RangeQueries((n,m), selected_rects)
+    M = workload.RangeQueries.fromlist((n,m), selected_rects)
     return M
 
 def GenerateCells(n,m,num1,num2,grid):
@@ -258,6 +258,7 @@ class HB(SelectionOperator):
             branching = find_best_branching(N)
             # remove root
             h_queries = buildHierarchical_sparse(N, branching).tocsr()[1:]
+            h_queries = matrix.EkteloMatrix(h_queries)
 
         elif len(self.domain_shape) == 2:
             N = self.domain_shape[0] * self.domain_shape[1]
@@ -439,7 +440,7 @@ class QuadTree(SelectionOperator):
                 selected_quads.extend(sub_quads)
                 pending.extend(sub_quads)   
 
-        M = workload.RangeQueries((n,m), selected_quads)
+        M = workload.RangeQueries.fromlist((n,m), selected_quads)
         return M
 
     def select(self):
@@ -491,7 +492,7 @@ class UniformGrid(SelectionOperator):
 
         cells = GenerateCells(n, m, num1, num2, grid)
 
-        return workload.RangeQueries((n, m), cells)
+        return workload.RangeQueries.fromlist((n, m), cells)
 
 
 
@@ -537,7 +538,7 @@ class AdaptiveGrid(SelectionOperator):
             # generate cell and pending queries base on new celss
             cells = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
             
-        return workload.RangeQueries((nn, mm), cells)
+        return workload.RangeQueries.fromlist((nn, mm), cells)
 
 
 class Wavelet(SelectionOperator):
