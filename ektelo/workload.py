@@ -186,6 +186,9 @@ class RangeQueries(matrix._LazyProduct):
     def __abs__(self):
         return self
 
+    def unproject(self, offset, domain):
+        return RangeQueries(domain, self._lower+np.array(offset), self._higher+np.array(offset))
+
 class Marginal(Kronecker):
     def __init__(self, domain, binary):
         self.binary = binary

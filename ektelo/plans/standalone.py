@@ -1,5 +1,6 @@
 from ektelo import support
 from ektelo import util
+from ektelo import matrix
 from ektelo.matrix import EkteloMatrix, VStack
 from ektelo.client import inference
 from ektelo.client import selection
@@ -410,7 +411,6 @@ class AGrid(Base):
 
     def Run(self, W, x, eps, seed):
         assert len(x.shape) == 2, "Adaptive Grid only works for 2D domain"
-
         shape_2d = x.shape
         x = x.flatten()
         prng = np.random.RandomState(seed)
@@ -418,10 +418,12 @@ class AGrid(Base):
         ys = []
 
         M = selection.UniformGrid(shape_2d, 
-								  self.data_scale, 
-								  eps, 
-								  ag_flag=True, 
-								  c=self.c).select()
+                                  self.data_scale, 
+                                  eps, 
+                                  ag_flag=True, 
+                                  c=self.c).select()
+
+
         y  = measurement.Laplace(M, self.alpha*eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -431,36 +433,40 @@ class AGrid(Base):
         # Prepare parition object for later SplitByParition.
         # This Partition selection operator is missing from Figure 2, plan 12 in the paper.
         uniform_mapping = mapper.UGridPartition(shape_2d, 
-												self.data_scale, 
-												eps, 
-												ag_flag=True, 
-												c=self.c).mapping()
+                                                self.data_scale, 
+                                                eps, 
+                                                ag_flag=True, 
+                                                c=self.c).mapping()
         x_sub_list =  meta.SplitByPartition(uniform_mapping).transform(x)
         sub_domains = support.get_subdomain_grid(uniform_mapping, shape_2d)
 
-        for i in sorted(set(uniform_mapping)):
-            x_i = x_sub_list[i]
+        ll, hi =[], []
 
+        for i in sorted(set(uniform_mapping)):
+
+            x_i = x_sub_list[i]
             P_i = support.projection_matrix(uniform_mapping, i) 
             x_hat_i =  P_i * x_hat 
 
             sub_domain_shape = sub_domains[i]
-
             M_i = selection.AdaptiveGrid(sub_domain_shape, 
-										 x_hat_i, 
-										 (1-self.alpha)*eps, 
-										 c2=self.c2).select()
+                                         x_hat_i, 
+                                         (1-self.alpha)*eps, 
+                                         c2=self.c2).select()
+
+
             y_i = measurement.Laplace(M_i, (1-self.alpha)*eps).measure(x_i, prng)
 
-            M_i_o = M_i * P_i
+            offset = np.unravel_index(P_i.matrix.nonzero()[1][0], shape_2d)
+            ll.extend(M_i._lower + np.array(offset))
+            hi.extend(M_i._higher + np.array(offset))
 
-            Ms.append(M_i_o)
             ys.append(y_i)
 
-        x_hat = inference.LeastSquares().infer(Ms, ys, [1.0]*len(ys))
+        Ms.append(workload.RangeQueries(shape_2d, np.array(ll), np.array(hi)))
+        x_hat = inference.LeastSquares().infer(Ms, ys)
 
         return x_hat
-
 
 class DawaStriped(Base):
 

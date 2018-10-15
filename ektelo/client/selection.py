@@ -105,37 +105,45 @@ def split_rectangle(rect_range, b_h, b_v):
     n_rows = lower - upper + 1
     n_cols = right - left + 1  
 
-    # if equally divisible then b_{v,h} is the number of split points for each dimension
     h_split = b_h
     v_split = b_v
 
-    # otherwise create the list of splitpoints
-    if n_rows % b_h != 0:
-        new_hsize = np.divide(float(n_rows), b_h)
-        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
-
-    if n_cols % b_v != 0:
-        new_vsize = np.divide(float(n_cols), b_v)
-        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
-
     if b_h > n_rows:
         h_split = n_rows
+        boarder_h = [ (i, i) for i in range(h_split)]
+
+    elif n_rows % b_h != 0:
+        new_hsize = np.divide(float(n_rows), b_h)
+        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
+        temp = [i -1 for i in h_split]
+        boarder_h = list(zip(([0] + h_split), (temp + [n_rows-1])) )
+
+    else:
+        cell_size_h = util.old_div(n_rows, h_split)
+        boarder_h = [(i * cell_size_h, (i+1) * cell_size_h - 1) for i in range(h_split)]
+
+
+
     if b_v > n_cols:
         v_split = n_cols
+        boarder_v = [(i, i) for i in range(v_split)]
+    elif n_cols % b_v != 0:
+        new_vsize = np.divide(float(n_cols), b_v)
+        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
+        temp = [i -1 for i in v_split]
+        boarder_v = list(zip(([0] + v_split), (temp + [n_cols-1])) )
 
-    # build splitting points along each dimension
-    grid_h = np.split(np.arange(upper,lower + 1), h_split)
-    grid_v = np.split(np.arange(left, right + 1), v_split)
-
-    boarder_h = [(i.min(),i.max()) for i in grid_h]
-    boarder_v = [(i.min(),i.max()) for i in grid_v]
-
-    print(h_split, boarder_h)
-    final_ranges = [((i[0], j[0]), (i[1], j[1])) for i in boarder_h for j in boarder_v] 
-
-    return final_ranges
+    else:
+        cell_size_v = util.old_div(n_cols, v_split)
+        boarder_v = [(i * cell_size_v, (i+1) * cell_size_v - 1) for i in range(v_split)]
 
 
+    lower_list, upper_list = [], []
+    for (hl,hh), (vl, vh) in itertools.product(boarder_h, boarder_v):
+        lower_list.append((upper + hl, left + vl))
+        upper_list.append((upper + hh, left + vh))
+
+    return lower_list, upper_list
 
 
 def Hb2D(n, m, b_h, b_v):
@@ -145,27 +153,31 @@ def Hb2D(n, m, b_h, b_v):
     '''
 
     # Avoid doing recursion, python is notoriously bad at it
-    full_rect = ((0, 0), (n - 1, m - 1)) #inclusive ranges
-    pending        = [full_rect]
-    selected_rects = []
+    # start with full rectangular inclusive ranges
+    pending_l, pending_u = [(0, 0)], [(n - 1, m - 1)] 
+    selected_rects_l, selected_rects_u = [], []
 
-    while len(pending) != 0:
-        cur_rect = pending.pop()
+    while len(pending_l) != 0:
+        cur_rect_l = pending_l.pop()
+        cur_rect_u = pending_u.pop()
 
         # if it's a leaf then we don't want to split it anymore
-        if (cur_rect[1][0] - cur_rect[0][0] + 1) * (cur_rect[1][1] - cur_rect[0][1] + 1)  > 1:
+        if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
             
-                sub_rects = split_rectangle(cur_rect, b_h, b_v)
-                selected_rects.extend(sub_rects)
-                pending.extend(sub_rects)   
+                sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
+            
+                selected_rects_l.extend(sub_rects_l)
+                selected_rects_u.extend(sub_rects_u)
+                pending_l.extend(sub_rects_l)
+                pending_u.extend(sub_rects_u)
 
-    M = workload.RangeQueries.fromlist((n,m), selected_rects)
+    M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
     return M
 
 def GenerateCells(n,m,num1,num2,grid):
     # this function used to generate all the cells in UGrid
     assert math.ceil(util.old_div(n,float(grid))) == num1 and math.ceil(util.old_div(m,float(grid))) == num2, "Unable to generate cells for Ugrid: check grid number and grid size"
-    cells = []
+    lower, upper = [], []
     for i in range(num1):
         for j in range(num2):
             lb = [int(i*grid),int(j*grid)]
@@ -175,9 +187,10 @@ def GenerateCells(n,m,num1,num2,grid):
             if rb[1] >= m:
                 rb[1] = int(m-1)
 
-            cells = cells + [[lb,rb]]
+            lower.append(lb)
+            upper.append(rb)
 
-    return cells
+    return lower, upper
 
 
 class Identity(SelectionOperator):
@@ -405,20 +418,23 @@ class QuadTree(SelectionOperator):
         if n_rows == 1:
             # if x has only one row then do only vertical split
             row = lr[0]
-            return [(ul, (row, col_midpoint - 1)), ((row, col_midpoint), lr) ]  
+            return [ul, (row, col_midpoint)], [(row, col_midpoint - 1), lr]
 
         if n_cols == 1:
             # if x has only one col then do only horizontal split
             col = lr[1]
-            return [(ul, (row_midpoint - 1, col)), ((row_midpoint, col), lr) ]  
+            return [ul, (row_midpoint, col)] , [(row_midpoint - 1, col), lr]
 
         # o/w do both splits
         q1 = (ul,                                        (row_midpoint - 1, col_midpoint - 1))
         q2 = ((upper, col_midpoint),                     (row_midpoint - 1, right) )
         q3 = ((row_midpoint, left),                      (lower, col_midpoint - 1 + col_parity))
-        q4 = ((row_midpoint, col_midpoint + col_parity), lr)    
+        q4 = ((row_midpoint, col_midpoint + col_parity), lr)
 
-        return [q1, q2, q3, q4]
+        lower = [coordinates[0] for coordinates in [q1, q2, q3, q4] ]
+        upper = [coordinates[1] for coordinates in [q1, q2, q3, q4] ]
+
+        return lower, upper
 
     @staticmethod
     def quadtree(n, m):
@@ -427,21 +443,27 @@ class QuadTree(SelectionOperator):
             n and m can be arbitrary numbers
         '''
         # Avoid doing recursion, python is notoriously bad at it
-        full_quad = ((0, 0), (n - 1, m - 1))
-        pending        = [full_quad]
-        selected_quads = [full_quad]    
+        pending_l, pending_u = [(0, 0)], [(n - 1, m - 1)] 
+        selected_rects_l, selected_rects_u = [(0, 0)], [(n - 1, m - 1)] 
 
-        while len(pending) != 0:
-            cur_quad = pending.pop()
+        while len(pending_l) != 0:
+
+            cur_rect_l = pending_l.pop()
+            cur_rect_u = pending_u.pop()    
+
             # if it's a leaf then we don't want to split it anymore
-            if (cur_quad[1][0] - cur_quad[0][0] + 1) * (cur_quad[1][1] - cur_quad[0][1] + 1)  > 1:
+            if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
             
-                sub_quads = QuadTree.rect_to_quads(cur_quad)
-                selected_quads.extend(sub_quads)
-                pending.extend(sub_quads)   
+                    sub_rects_l, sub_rects_u = QuadTree.rect_to_quads((cur_rect_l, cur_rect_u))
+        
+                    selected_rects_l.extend(sub_rects_l)
+                    selected_rects_u.extend(sub_rects_u)
+                    pending_l.extend(sub_rects_l)
+                    pending_u.extend(sub_rects_u)
 
-        M = workload.RangeQueries.fromlist((n,m), selected_quads)
+        M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
         return M
+
 
     def select(self):
         return QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])
@@ -490,10 +512,8 @@ class UniformGrid(SelectionOperator):
         num1 = int(util.old_div((n - 1), grid) + 1)
         num2 = int(util.old_div((m - 1), grid) + 1)
 
-        cells = GenerateCells(n, m, num1, num2, grid)
-
-        return workload.RangeQueries.fromlist((n, m), cells)
-
+        lower, upper = GenerateCells(n, m, num1, num2, grid)
+        return workload.RangeQueries((n, m), np.array(lower), np.array(upper))
 
 
 class AdaptiveGrid(SelectionOperator):
@@ -515,8 +535,7 @@ class AdaptiveGrid(SelectionOperator):
 
         if shape == (1, 1):
             # skip the calucation of newgrids if shape is of size 1
-            mymatrix = sparse.csr_matrix(([1], ([0], [0])), shape=(1, 1))
-            return matrix.EkteloMatrix(mymatrix)
+            return workload.RangeQueries((1,1), lower=np.array([[0,0]]), higher=np.array([[0,0]]))
 
         else:
             eps = self.eps_par
@@ -536,9 +555,9 @@ class AdaptiveGrid(SelectionOperator):
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
 
             # generate cell and pending queries base on new celss
-            cells = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
+            lower, higher = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
             
-        return workload.RangeQueries.fromlist((nn, mm), cells)
+        return workload.RangeQueries(self.domain_shape, np.array(lower), np.array(higher))
 
 
 class Wavelet(SelectionOperator):
