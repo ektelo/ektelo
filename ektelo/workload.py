@@ -155,9 +155,6 @@ class RangeQueries(matrix._LazyProduct):
             data[start:end] = -coef
             start = end
         
-        row_ind = np.concatenate(row_ind)
-        col_ind = np.concatenate(col_ind)
-        data = np.concatenate(data)
         self._transformer = sparse.csr_matrix((data[:end], (row_ind[:end], col_ind[:end])), shape, dtype)
 
         P = Kronecker([Prefix(n) for n in domain])
