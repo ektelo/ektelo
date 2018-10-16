@@ -190,7 +190,7 @@ class Sum(EkteloMatrix):
         # all must have same shape
         self.matrices = matrices
         self.shape = matrices[0].shape
-        self.dtype = matrices[0].dtype # RM: what to do if dtypes differ?
+        self.dtype = np.result_type(*[Q.dtype for Q in matrices])
 
     def _matmat(self, V):
         return sum(Q.dot(V) for Q in self.matrices)
@@ -211,7 +211,7 @@ class VStack(EkteloMatrix):
         assert all(Q.shape[1] == n for Q in matrices), 'dimension mismatch'
         self.shape = (m,n)
         self.matrices = matrices
-        self.dtype = matrices[0].dtype # what if dtypes differ?
+        self.dtype = np.result_type(*[Q.dtype for Q in matrices])
     
     def _matmat(self, V):
         return np.vstack([Q.dot(V) for Q in self.matrices])
@@ -251,7 +251,7 @@ class HStack(EkteloMatrix):
         assert all(Q.shape[0] == m for Q in matrices), 'dimension mismatch'
         self.shape = (m,n)
         self.matrices = matrices
-        self.dtype = matrices[0].dtype
+        self.dtype = np.result_type(*[Q.dtype for Q in matrices])
         self.split = np.cumsum(cols)[:-1]
 
     def _matmat(self, V):
@@ -286,7 +286,7 @@ class Kronecker(EkteloMatrix):
     def __init__(self, matrices):
         self.matrices = matrices
         self.shape = tuple(np.prod([Q.shape for Q in matrices], axis=0))
-        self.dtype = matrices[0].dtype
+        self.dtype = np.result_type(*[Q.dtype for Q in matrices])
 
     def _matmat(self, V):
         X = V
@@ -331,7 +331,7 @@ class _LazyProduct(EkteloMatrix):
         self._A = A
         self._B = B
         self.shape = (A.shape[0], B.shape[1])
-        self.dtype = A.dtype
+        self.dtype = np.result_type(A.dtype, B.dtype)
 
     def _matmat(self, X):
         return self._A.dot(self._B.dot(X))
