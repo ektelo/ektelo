@@ -437,33 +437,71 @@ class QuadTree(SelectionOperator):
         return lower, upper
 
     @staticmethod
+    def quick_product_sum(*arrays):
+        '''
+        Quick calculation of cross products of a list of arrays.
+        Return the sum of each result
+        '''
+        la = len(arrays)
+        arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
+        for i, a in enumerate(np.ix_(*arrays)):
+            arr[i, ...] = a
+        M = arr.reshape(la, -1)
+        return M.sum(axis = 0)
+
+    @staticmethod
+    def expand_offsets(cur_rect_l, cur_rect_u, offsets_h, offsets_v):
+        '''
+        Expand offsets at different level to generate the final offsets for 
+        all candidate by computing the sum of each tuple in the cross product 
+        of offset arrays.
+        e.g two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
+        [2 4 2 3 5 3 2 4 2]
+        '''
+        if len(offsets_h) == 0 and len(offsets_v) == 0:
+            return [cur_rect_l], [cur_rect_u]
+        horizontal_offsets = QuadTree.quick_product_sum(*offsets_h)
+        vertical_offsets   = QuadTree.quick_product_sum(*offsets_v)
+        return np.vstack((horizontal_offsets + cur_rect_l[0], cur_rect_l[1] + vertical_offsets)).T, \
+               np.vstack((cur_rect_u[0] + horizontal_offsets, cur_rect_u[1] + vertical_offsets)).T
+
+    @staticmethod
     def quadtree(n, m):
         ''' Quadtree function, accepts a shape (n, m)
             and returns a set of measurements in sparse format on the expanded x vector
             n and m can be arbitrary numbers
         '''
         # Avoid doing recursion, python is notoriously bad at it
-        pending_l, pending_u = [(0, 0)], [(n - 1, m - 1)] 
-        selected_rects_l, selected_rects_u = [(0, 0)], [(n - 1, m - 1)] 
+        assert n != 0 and ((n& (n - 1)) == 0) and m != 0 and ((m & (m - 1)) == 0),\
+        "Current implementation only works for dimensions that is a power of 2"
+        # TODO: deal with non-power-of-2 cases.
 
+        pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
+        pending_offsets =[ ([], []) ]
+        selected_rects_l, selected_rects_u = [], [] 
         while len(pending_l) != 0:
-
             cur_rect_l = pending_l.pop()
-            cur_rect_u = pending_u.pop()    
-
+            cur_rect_u = pending_u.pop()
+            offset_h, offset_v = pending_offsets.pop()
+            # resolve offsets in any pending ranges
+            lower, higher = QuadTree.expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
+            selected_rects_l.extend(lower)
+            selected_rects_u.extend(higher)
             # if it's a leaf then we don't want to split it anymore
             if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
-            
                     sub_rects_l, sub_rects_u = QuadTree.rect_to_quads((cur_rect_l, cur_rect_u))
-        
-                    selected_rects_l.extend(sub_rects_l)
-                    selected_rects_u.extend(sub_rects_u)
-                    pending_l.extend(sub_rects_l)
-                    pending_u.extend(sub_rects_u)
-
+                    offset_h_level, offset_v_level = [], []
+                    for l,u in sub_rects_l:
+                        offset_h_level.append(l - sub_rects_l[0][0])
+                        offset_v_level.append(u - sub_rects_l[0][1])
+                    offset_h.append(np.array(offset_h_level))
+                    offset_v.append(np.array(offset_v_level))
+                    # append the first quad to pending
+                    pending_l.append(sub_rects_l[0])
+                    pending_u.append(sub_rects_u[0])
+                    pending_offsets.append((offset_h, offset_v))
         M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
         return M
-
 
     def select(self):
         return QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])

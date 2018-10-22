@@ -359,11 +359,13 @@ class QuadTree(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
-        x = x.flatten()
+        assert len(x.shape) == 2, "QuadTree only works for 2D domain"
         prng = np.random.RandomState(seed)
-        shape_2d = (x.shape[0]//2,2)
-        
+        shape_2d = x.shape
+        x = x.flatten()
+
         M = selection.QuadTree(shape_2d).select()
+
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
