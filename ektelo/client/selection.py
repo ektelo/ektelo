@@ -123,7 +123,6 @@ def split_rectangle(rect_range, b_h, b_v):
         boarder_h = [(i * cell_size_h, (i+1) * cell_size_h - 1) for i in range(h_split)]
 
 
-
     if b_v > n_cols:
         v_split = n_cols
         boarder_v = [(i, i) for i in range(v_split)]
@@ -145,32 +144,90 @@ def split_rectangle(rect_range, b_h, b_v):
 
     return lower_list, upper_list
 
+def same_shape(rect_l, rect_u):
+    '''
+    Check the shape of all candidate rects,
+    return the indices in groups with the same shape
+    '''
+    dic = dict()
+    shape = np.array(rect_u) - np.array(rect_l)
+    for i in range(len(shape)):
+        s = tuple(shape[i])
+        if s in dic:
+            dic[s].append(i)
+        else:
+            dic[s] = [i]
+    return list(dic.values())
+
+def quick_product_sum(*arrays):
+    '''
+    Quick calculation of cross products of a list of arrays.
+    Return the sum of each result
+    '''
+    la = len(arrays)
+    arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[i, ...] = a
+    M = arr.reshape(la, -1)
+    return M.sum(axis = 0)
+
+def expand_offsets(cur_rect_l, cur_rect_u, offsets_h, offsets_v):
+    '''
+    Expand offsets at different level to generate the final offsets for 
+    all candidate by computing the sum of each tuple in the cross product 
+    of offset arrays.
+    e.g two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
+    [2 4 2 3 5 3 2 4 2]
+    '''
+    # Remove starting empty offset
+    offsets_h = offsets_h[1:] if offsets_h[0] == [] else offsets_h
+    offsets_v = offsets_v[1:] if offsets_v[0] == [] else offsets_v
+
+    if len(offsets_h) == 0 and len(offsets_v) == 0:
+        return [], []
+    horizontal_offsets = quick_product_sum(*offsets_h)
+    vertical_offsets   = quick_product_sum(*offsets_v)
+    return np.vstack((horizontal_offsets + cur_rect_l[0], cur_rect_l[1] + vertical_offsets)).T, \
+           np.vstack((cur_rect_u[0] + horizontal_offsets, cur_rect_u[1] + vertical_offsets)).T
+
 
 def Hb2D(n, m, b_h, b_v):
     ''' Implementation of Hb for 2D histograms
             (n,m): the shape of x
             b_v, b_h = the vertical and horizontal branching factorr respectively
     '''
-
     # Avoid doing recursion, python is notoriously bad at it
-    # start with full rectangular inclusive ranges
-    pending_l, pending_u = [(0, 0)], [(n - 1, m - 1)] 
-    selected_rects_l, selected_rects_u = [], []
-
+    pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
+    # Avoid calculating partition for quads of the same shape
+    # by storing a base quad and a list of offset in each level of the hierarchy 
+    pending_offsets_h, pending_offsets_v = [[[]]], [[[]]]
+    # HB doesn't include the root node
+    selected_rects_l, selected_rects_u = [], [] 
     while len(pending_l) != 0:
         cur_rect_l = pending_l.pop()
         cur_rect_u = pending_u.pop()
-
+        offset_h = pending_offsets_h.pop()
+        offset_v = pending_offsets_v.pop()
+        # resolve offsets in any pending ranges
+        lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
+        selected_rects_l.extend(lower)
+        selected_rects_u.extend(higher)
         # if it's a leaf then we don't want to split it anymore
         if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
-            
-                sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
-            
-                selected_rects_l.extend(sub_rects_l)
-                selected_rects_u.extend(sub_rects_u)
-                pending_l.extend(sub_rects_l)
-                pending_u.extend(sub_rects_u)
-
+            sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
+            same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
+            for group_idx in same_shape_groups:
+                sub_rects_l_group = np.array(sub_rects_l)[group_idx]
+                sub_rects_u_group = np.array(sub_rects_u)[group_idx]
+                offset_h_level, offset_v_level = [], []
+                for l,u in sub_rects_l_group:
+                    offset_h_level.append(l - sub_rects_l_group[0][0])
+                    offset_v_level.append(u - sub_rects_l_group[0][1])
+                # append the first quad in subgroup to pending list
+                pending_l.append(sub_rects_l_group[0])
+                pending_u.append(sub_rects_u_group[0])
+                pending_offsets_h.append(offset_h + [offset_h_level])
+                pending_offsets_v.append(offset_v + [offset_v_level])
     M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
     return M
 
@@ -436,50 +493,6 @@ class QuadTree(SelectionOperator):
 
         return lower, upper
 
-    @staticmethod
-    def quick_product_sum(*arrays):
-        '''
-        Quick calculation of cross products of a list of arrays.
-        Return the sum of each result
-        '''
-        la = len(arrays)
-        arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
-        for i, a in enumerate(np.ix_(*arrays)):
-            arr[i, ...] = a
-        M = arr.reshape(la, -1)
-        return M.sum(axis = 0)
-
-    @staticmethod
-    def expand_offsets(cur_rect_l, cur_rect_u, offsets_h, offsets_v):
-        '''
-        Expand offsets at different level to generate the final offsets for 
-        all candidate by computing the sum of each tuple in the cross product 
-        of offset arrays.
-        e.g two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
-        [2 4 2 3 5 3 2 4 2]
-        '''
-        if len(offsets_h) == 0 and len(offsets_v) == 0:
-            return [cur_rect_l], [cur_rect_u]
-        horizontal_offsets = QuadTree.quick_product_sum(*offsets_h)
-        vertical_offsets   = QuadTree.quick_product_sum(*offsets_v)
-        return np.vstack((horizontal_offsets + cur_rect_l[0], cur_rect_l[1] + vertical_offsets)).T, \
-               np.vstack((cur_rect_u[0] + horizontal_offsets, cur_rect_u[1] + vertical_offsets)).T
-
-    @staticmethod
-    def same_shape(rect_l, rect_u):
-        '''
-        Check the shape of all candidate rects,
-        return the indices in groups with the same shape
-        '''
-        dic = dict()
-        shape = np.array(rect_u) - np.array(rect_l)
-        for i in range(len(shape)):
-            s = tuple(shape[i])
-            if s in dic:
-                dic[s].append(i)
-            else:
-                dic[s] = [i]
-        return list(dic.values())
 
     @staticmethod
     def quadtree(n, m):
@@ -489,7 +502,8 @@ class QuadTree(SelectionOperator):
         '''
         # Avoid doing recursion, python is notoriously bad at it
         pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
-
+        # Avoid calculating partition for quads of the same shape
+        # by storing a base quad and a list of offset in each level of the hierarchy 
         pending_offsets_h, pending_offsets_v = [[[0]]], [[[0]]]
         selected_rects_l, selected_rects_u = [], [] 
         while len(pending_l) != 0:
@@ -498,13 +512,13 @@ class QuadTree(SelectionOperator):
             offset_h = pending_offsets_h.pop()
             offset_v = pending_offsets_v.pop()
             # resolve offsets in any pending ranges
-            lower, higher = QuadTree.expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
+            lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
             selected_rects_l.extend(lower)
             selected_rects_u.extend(higher)
             # if it's a leaf then we don't want to split it anymore
             if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
                 sub_rects_l, sub_rects_u = QuadTree.rect_to_quads((cur_rect_l, cur_rect_u))
-                same_shape_groups = QuadTree.same_shape(sub_rects_l, sub_rects_u)
+                same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
 
                 for group_idx in same_shape_groups:
                     sub_rects_l_group = np.array(sub_rects_l)[group_idx]
