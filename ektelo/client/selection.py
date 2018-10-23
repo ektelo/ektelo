@@ -532,8 +532,10 @@ class QuadTree(SelectionOperator):
                     pending_u.append(sub_rects_u_group[0])
                     pending_offsets_h.append(offset_h + [offset_h_level])
                     pending_offsets_v.append(offset_v + [offset_v_level])
-
-        M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
+    
+        lower = np.array(selected_rects_l, dtype=np.int32)
+        upper = np.array(selected_rects_u, dtype=np.int32)
+        M = workload.RangeQueries((n,m), lower, upper, np.float32)
         return M
 
     def select(self):

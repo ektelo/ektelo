@@ -122,8 +122,8 @@ class RangeQueries(matrix._LazyProduct):
         :param higher: a q x d array of upper boundareis for the q queries
         """
         assert lower.shape == higher.shape, 'lower and higher must have same shape'
-        assert np.all(lower <= higher), 'lower index must be <= than higher index'
-        
+        #assert np.all(lower <= higher), 'lower index must be <= than higher index'
+
         if type(domain) is int:
             domain = (domain,)
             lower = lower[:,None]
@@ -134,14 +134,14 @@ class RangeQueries(matrix._LazyProduct):
         self._lower = lower
         self._higher = higher
 
-        idx = np.arange(np.prod(domain)).reshape(domain)
+        idx = np.arange(np.prod(domain), dtype=np.int32).reshape(domain)
         shape = (lower.shape[0], np.prod(domain))
         corners = np.array(list(itertools.product(*[(False,True)]*len(domain))))
         size = len(corners)*lower.shape[0]
         row_ind = np.zeros(size, dtype=np.int32)
         col_ind = np.zeros(size, dtype=np.int32)
         data = np.zeros(size, dtype=dtype)
-        queries = np.arange(shape[0]) 
+        queries = np.arange(shape[0], dtype=np.int32) 
         start = 0
         
         for corner in corners:
@@ -154,10 +154,10 @@ class RangeQueries(matrix._LazyProduct):
             col_ind[start:end] = index[keep]
             data[start:end] = -coef
             start = end
-        
-        self._transformer = sparse.csr_matrix((data[:end], (row_ind[:end], col_ind[:end])), shape, dtype)
 
-        P = Kronecker([Prefix(n) for n in domain])
+        self._transformer=sparse.csr_matrix((data[:end],(row_ind[:end],col_ind[:end])),shape,dtype)
+
+        P = Kronecker([Prefix(n, dtype) for n in domain])
         T = EkteloMatrix(self._transformer)
         matrix._LazyProduct.__init__(self, T, P)
 
