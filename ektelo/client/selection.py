@@ -212,13 +212,18 @@ def Hb2D(n, m, b_h, b_v):
         lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
         selected_rects_l.extend(lower)
         selected_rects_u.extend(higher)
-        # if it's a leaf then we don't want to split it anymore
-        if (cur_rect_u[0] - cur_rect_l[0] + 1) * (cur_rect_u[1] - cur_rect_l[1] + 1)  > 1:
-            sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
-            same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
-            for group_idx in same_shape_groups:
-                sub_rects_l_group = np.array(sub_rects_l)[group_idx]
-                sub_rects_u_group = np.array(sub_rects_u)[group_idx]
+
+        sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
+        same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
+
+        for group_idx in same_shape_groups:
+            sub_rects_l_group = np.array(sub_rects_l)[group_idx]
+            sub_rects_u_group = np.array(sub_rects_u)[group_idx]
+            # If it's a leaf don't add to pending rects,
+            # append Identity at the end of selection.
+            if (sub_rects_u_group[0][0] - sub_rects_l_group[0][0] + 1) * \
+               (sub_rects_u_group[0][1] - sub_rects_l_group[0][1] + 1) > 1:
+
                 offset_h_level, offset_v_level = [], []
                 for l,u in sub_rects_l_group:
                     offset_h_level.append(l - sub_rects_l_group[0][0])
@@ -228,8 +233,12 @@ def Hb2D(n, m, b_h, b_v):
                 pending_u.append(sub_rects_u_group[0])
                 pending_offsets_h.append(offset_h + [offset_h_level])
                 pending_offsets_v.append(offset_v + [offset_v_level])
-    M = workload.RangeQueries((n,m), np.array(selected_rects_l), np.array(selected_rects_u))
-    return M
+
+    lower = np.array(selected_rects_l, dtype=np.int32)
+    upper = np.array(selected_rects_u, dtype=np.int32)
+    M = workload.RangeQueries((n,m), lower, upper, np.float32)
+
+    return matrix.VStack([M, matrix.Identity(n*m)])
 
 def GenerateCells(n,m,num1,num2,grid):
     # this function used to generate all the cells in UGrid
