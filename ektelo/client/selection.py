@@ -191,54 +191,7 @@ def expand_offsets(cur_rect_l, cur_rect_u, offsets_h, offsets_v):
            np.vstack((cur_rect_u[0] + horizontal_offsets, cur_rect_u[1] + vertical_offsets)).T
 
 
-def Hb2D(n, m, b_h, b_v):
-    ''' Implementation of Hb for 2D histograms
-            (n,m): the shape of x
-            b_v, b_h = the vertical and horizontal branching factorr respectively
-    '''
-    # Avoid doing recursion, python is notoriously bad at it
-    pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
-    # Avoid calculating partition for quads of the same shape
-    # by storing a base quad and a list of offset in each level of the hierarchy 
-    pending_offsets_h, pending_offsets_v = [[[]]], [[[]]]
-    # HB doesn't include the root node
-    selected_rects_l, selected_rects_u = [], [] 
-    while len(pending_l) != 0:
-        cur_rect_l = pending_l.pop()
-        cur_rect_u = pending_u.pop()
-        offset_h = pending_offsets_h.pop()
-        offset_v = pending_offsets_v.pop()
-        # resolve offsets in any pending ranges
-        lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
-        selected_rects_l.extend(lower)
-        selected_rects_u.extend(higher)
 
-        sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
-        same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
-
-        for group_idx in same_shape_groups:
-            sub_rects_l_group = np.array(sub_rects_l)[group_idx]
-            sub_rects_u_group = np.array(sub_rects_u)[group_idx]
-            # If it's a leaf don't add to pending rects,
-            # append Identity at the end of selection.
-            if (sub_rects_u_group[0][0] - sub_rects_l_group[0][0] + 1) * \
-               (sub_rects_u_group[0][1] - sub_rects_l_group[0][1] + 1) > 1:
-
-                offset_h_level, offset_v_level = [], []
-                for l,u in sub_rects_l_group:
-                    offset_h_level.append(l - sub_rects_l_group[0][0])
-                    offset_v_level.append(u - sub_rects_l_group[0][1])
-                # append the first quad in subgroup to pending list
-                pending_l.append(sub_rects_l_group[0])
-                pending_u.append(sub_rects_u_group[0])
-                pending_offsets_h.append(offset_h + [offset_h_level])
-                pending_offsets_v.append(offset_v + [offset_v_level])
-
-    lower = np.array(selected_rects_l, dtype=np.int32)
-    upper = np.array(selected_rects_u, dtype=np.int32)
-    M = workload.RangeQueries((n,m), lower, upper, np.float32)
-
-    return matrix.VStack([M, matrix.Identity(n*m)])
 
 def GenerateCells(n,m,num1,num2,grid):
     # this function used to generate all the cells in UGrid
@@ -330,6 +283,56 @@ class HB(SelectionOperator):
                 ), 'HB selection only supports 1D and 2D domain shapes'
         self.domain_shape = domain_shape
 
+    @staticmethod
+    def Hb2D(n, m, b_h, b_v):
+        ''' Implementation of Hb for 2D histograms
+                (n,m): the shape of x
+                b_v, b_h = the vertical and horizontal branching factorr respectively
+        '''
+        # Avoid doing recursion, python is notoriously bad at it
+        pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
+        # Avoid calculating partition for quads of the same shape
+        # by storing a base quad and a list of offset in each level of the hierarchy 
+        pending_offsets_h, pending_offsets_v = [[[]]], [[[]]]
+        # HB doesn't include the root node
+        selected_rects_l, selected_rects_u = [], [] 
+        while len(pending_l) != 0:
+            cur_rect_l = pending_l.pop()
+            cur_rect_u = pending_u.pop()
+            offset_h = pending_offsets_h.pop()
+            offset_v = pending_offsets_v.pop()
+            # resolve offsets in any pending ranges
+            lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
+            selected_rects_l.extend(lower)
+            selected_rects_u.extend(higher) 
+
+            sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
+            same_shape_groups = same_shape(sub_rects_l, sub_rects_u)    
+
+            for group_idx in same_shape_groups:
+                sub_rects_l_group = np.array(sub_rects_l)[group_idx]
+                sub_rects_u_group = np.array(sub_rects_u)[group_idx]
+                # If it's a leaf don't add to pending rects,
+                # append Identity at the end of selection.
+                if (sub_rects_u_group[0][0] - sub_rects_l_group[0][0] + 1) * \
+                   (sub_rects_u_group[0][1] - sub_rects_l_group[0][1] + 1) > 1: 
+
+                    offset_h_level, offset_v_level = [], []
+                    for l,u in sub_rects_l_group:
+                        offset_h_level.append(l - sub_rects_l_group[0][0])
+                        offset_v_level.append(u - sub_rects_l_group[0][1])
+                    # append the first quad in subgroup to pending list
+                    pending_l.append(sub_rects_l_group[0])
+                    pending_u.append(sub_rects_u_group[0])
+                    pending_offsets_h.append(offset_h + [offset_h_level])
+                    pending_offsets_v.append(offset_v + [offset_v_level])   
+
+        lower = np.array(selected_rects_l, dtype=np.int32)
+        upper = np.array(selected_rects_u, dtype=np.int32)
+        M = workload.RangeQueries((n,m), lower, upper, np.float32)  
+
+        return matrix.VStack([M, matrix.Identity(n*m)])
+
     def select(self):
         if len(self.domain_shape) == 1:
 
@@ -342,7 +345,7 @@ class HB(SelectionOperator):
         elif len(self.domain_shape) == 2:
             N = self.domain_shape[0] * self.domain_shape[1]
             branching = find_best_branching(N)
-            h_queries = Hb2D(self.domain_shape[0], 
+            h_queries = HB.Hb2D(self.domain_shape[0], 
                              self.domain_shape[1],
                              branching, 
                              branching)
