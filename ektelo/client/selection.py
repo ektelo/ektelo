@@ -16,183 +16,6 @@ from ektelo import matrix, workload
 from functools import reduce
 
 
-def variance(N, b):
-    '''Computes variance given domain of size N
-    and branchng factor b.  Equation 3 from paper.'''
-    h = math.ceil(math.log(N, b))
-
-    return ( ((b - 1) * h**3) - (util.old_div((2 * (b+1) * h**2), 3)))
-
-
-def buildHierarchical_sparse(n, b):
-    '''
-    Builds a sparsely represented (csr_matrix) hierarchical matrix
-    with n columns and a branching factor of b.  Works even when n
-    is not a power of b
-    '''
-    if n == 1:
-        return sparse.csr_matrix([1.0])
-    if n <= b:
-        a = np.ones(n)
-        b = sparse.identity(n, format='csr')
-        return sparse.vstack([a, b])
-
-    # n = mb + r where r < b
-    # n = (m+1) r + m (b-r)
-    # we need r hierarchical matrices with (m+1) cols
-    # and (b-r) hierarchical matrices with m cols
-    m, r = divmod(n, b)
-    hier0 = buildHierarchical_sparse(m, b) # hierarchical matrix with m cols
-    if r > 0:
-        hier1 = buildHierarchical_sparse(m+1, b) # hierarchical matrix with (m+1) cols
-
-    # sparse.hstack doesn't work when matrices have 0 cols
-    def hstack(left, hier, right):
-        if left.shape[1] > 0 and right.shape[1] > 0:
-            return sparse.hstack([left, hier, right])
-        elif left.shape[1] > 0:
-            return sparse.hstack([left, hier])
-        else:
-            return sparse.hstack([hier, right])
-
-    res = [np.ones(n)]
-    for i in range(r):
-        rows = hier1.shape[0]
-        start = (m+1)*i
-        end = start + m+1
-        left = sparse.csr_matrix((rows, start))
-        right = sparse.csr_matrix((rows, n-end))
-        res.append(hstack(left, hier1, right))
-    for i in range(r, b):
-        # (m+1) r + m (b-r) = (m+1) r + m (b-i) + m (i-r)
-        rows = hier0.shape[0]
-        start = (m+1)*r + m*(i-r)
-        end = start + m
-        left = sparse.csr_matrix((rows, start))
-        right = sparse.csr_matrix((rows, n-end))
-        res.append(hstack(left, hier0, right))
-
-    return sparse.vstack(res, format='csr')
-
-
-def find_best_branching(N):
-    '''
-    Technique from Qardaji et al. PVLDB 2013.
-    Try all branchings from 2 to N and pick one
-    with minimum variance.
-    N in this context is domain size
-    '''
-    min_v = float('inf')
-    min_b = None
-    for b in range(2,N+1):
-        v = variance(N, b)
-        if v < min_v:
-            min_v = v
-            min_b = b
-
-    return min_b
-
-
-def split_rectangle(rect_range, b_h, b_v):
-    """
-    Split rectangular domain into grids according to branching factors
-    Input and output ranges represented as corner coordinates (inclusive)
-    For use with Hb2D, Ugird and Agrid
-    """
-    ul, lr = rect_range
-    upper, left =  ul
-    lower, right = lr   
-    n_rows = lower - upper + 1
-    n_cols = right - left + 1  
-
-    h_split = b_h
-    v_split = b_v
-
-    if b_h > n_rows:
-        h_split = n_rows
-        boarder_h = [ (i, i) for i in range(h_split)]
-
-    elif n_rows % b_h != 0:
-        new_hsize = np.divide(float(n_rows), b_h)
-        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
-        temp = [i -1 for i in h_split]
-        boarder_h = list(zip(([0] + h_split), (temp + [n_rows-1])) )
-
-    else:
-        cell_size_h = util.old_div(n_rows, h_split)
-        boarder_h = [(i * cell_size_h, (i+1) * cell_size_h - 1) for i in range(h_split)]
-
-
-    if b_v > n_cols:
-        v_split = n_cols
-        boarder_v = [(i, i) for i in range(v_split)]
-    elif n_cols % b_v != 0:
-        new_vsize = np.divide(float(n_cols), b_v)
-        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
-        temp = [i -1 for i in v_split]
-        boarder_v = list(zip(([0] + v_split), (temp + [n_cols-1])) )
-
-    else:
-        cell_size_v = util.old_div(n_cols, v_split)
-        boarder_v = [(i * cell_size_v, (i+1) * cell_size_v - 1) for i in range(v_split)]
-
-
-    lower_list, upper_list = [], []
-    for (hl,hh), (vl, vh) in itertools.product(boarder_h, boarder_v):
-        lower_list.append((upper + hl, left + vl))
-        upper_list.append((upper + hh, left + vh))
-
-    return lower_list, upper_list
-
-def same_shape(rect_l, rect_u):
-    '''
-    Check the shape of all candidate rects,
-    return the indices in groups with the same shape
-    '''
-    dic = dict()
-    shape = np.array(rect_u) - np.array(rect_l)
-    for i in range(len(shape)):
-        s = tuple(shape[i])
-        if s in dic:
-            dic[s].append(i)
-        else:
-            dic[s] = [i]
-    return list(dic.values())
-
-def quick_product_sum(*arrays):
-    '''
-    Quick calculation of cross products of a list of arrays.
-    Return the sum of each result
-    '''
-    la = len(arrays)
-    arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
-    for i, a in enumerate(np.ix_(*arrays)):
-        arr[i, ...] = a
-    M = arr.reshape(la, -1)
-    return M.sum(axis = 0)
-
-def expand_offsets(cur_rect_l, cur_rect_u, offsets_h, offsets_v):
-    '''
-    Expand offsets at different level to generate the final offsets for 
-    all candidate by computing the sum of each tuple in the cross product 
-    of offset arrays.
-    e.g two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
-    [2 4 2 3 5 3 2 4 2]
-    '''
-    # Remove starting empty offset
-    offsets_h = offsets_h[1:] if offsets_h[0] == [] else offsets_h
-    offsets_v = offsets_v[1:] if offsets_v[0] == [] else offsets_v
-
-    if len(offsets_h) == 0 and len(offsets_v) == 0:
-        return [], []
-    horizontal_offsets = quick_product_sum(*offsets_h)
-    vertical_offsets   = quick_product_sum(*offsets_v)
-    return np.vstack((horizontal_offsets + cur_rect_l[0], cur_rect_l[1] + vertical_offsets)).T, \
-           np.vstack((cur_rect_u[0] + horizontal_offsets, cur_rect_u[1] + vertical_offsets)).T
-
-
-
-
 def GenerateCells(n,m,num1,num2,grid):
     # this function used to generate all the cells in UGrid
     assert math.ceil(util.old_div(n,float(grid))) == num1 and math.ceil(util.old_div(m,float(grid))) == num2, "Unable to generate cells for Ugrid: check grid number and grid size"
@@ -210,6 +33,310 @@ def GenerateCells(n,m,num1,num2,grid):
             upper.append(rb)
 
     return lower, upper
+
+class HierarchicalRanges(SelectionOperator):
+    ''' 
+    ND hiearchical selection operator
+    At any level of the Hiearchy, the domain is partitioned using some
+    data-independent function. This class provide efficient implementation
+    to generate the lower and upper boudaries through the ranges_gen() function.
+    '''
+
+    def __init__(self, domain_shape, include_root, split_func, **kwargs):
+        self.domain_shape = domain_shape
+        self.include_root = include_root
+        self.split_func = split_func
+        self.kwargs = kwargs
+
+
+    @staticmethod    
+    def same_shape(rect_l, rect_u):
+        '''
+        Check the shape of all candidate rects,
+        return the indices in groups with the same shape
+        '''
+        dic = dict()
+        shape = np.array(rect_u) - np.array(rect_l)
+        for i in range(len(shape)):
+            s = tuple(shape[i])
+            if s in dic:
+                dic[s].append(i)
+            else:
+                dic[s] = [i]
+        return list(dic.values())
+
+    @staticmethod
+    def quick_product(*arrays):
+        '''
+        Quick calculation of cross products of a list of arrays.
+        Return the sum of each result
+        '''
+        la = len(arrays)
+        arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
+        for i, a in enumerate(np.ix_(*arrays)):
+            arr[i, ...] = a
+        return arr.reshape(la, -1)
+
+    @staticmethod
+    def expand_offsets(cur_rect_l, cur_rect_u, offsets):
+        '''
+        Expand offsets at different level along each dimension to generate the 
+        final offsets for all candidate by computing the sum of each tuple in the 
+        cross product of offset arrays.
+        e.g For the some dimension two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
+        [2 4 2 3 5 3 2 4 2]
+        cur_rect_l and cur_rect_u: coordinates of the lower and upper corner of the range.
+        offsets: Nested array representing offsets of ranges along dimension, level of hierarchy    
+
+        ''' 
+        # remove empty list(no query at this level)
+        offsets = [list(filter(lambda x: len(x) > 0, d)) for d in offsets]
+        assert all([len(d) == len(offsets[0]) for d in offsets]),\
+               "Shape of offsets along each dimension should match."    
+        if len(offsets[0]) < 1:
+            return [], []   
+        # expand offsets across different levels.
+        expanded_offsets = [HierarchicalRanges.quick_product(*d).sum(axis=0) for d in offsets] 
+        lower = np.vstack([ l + offset for l, offset in zip(cur_rect_l, expanded_offsets)]).T
+        upper = np.vstack([ u + offset for u, offset in zip(cur_rect_u, expanded_offsets)]).T
+        return lower, upper
+
+    @staticmethod
+    def grid_split_range(cur_range_l, cur_range_u, **kwargs):
+        """
+        Split ND-range into grids according to branching factors along each dimension
+        cur_range_l, cur_range_u: coordinates of the lower and upper boundary 
+        kwargs: needs to have a 'branching_list' memeber with the branching factor along each dimension
+        """
+        branchings = kwargs['branching_list']
+        dim_lens = np.array(cur_range_u) - np.array(cur_range_l) + 1
+        assert len(branchings) == len(dim_lens), "The numbers of dimension and branching factors need to match"
+        def get_boarder(dim_len, branching):
+            if branching > dim_len:
+                split_num = dim_len
+                boarder = [ (i, i) for i in range(split_num)]
+            elif dim_len % branching != 0:
+                new_hsize = np.divide(float(dim_len), branching)
+                split_num = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(branching - 1)]
+                temp = [i -1 for i in split_num]
+                boarder = list(zip(([0] + split_num), (temp + [dim_len-1])) )
+            else:
+                cell_size_h = util.old_div(dim_len, branching)
+                boarder = [(i * cell_size_h, (i+1) * cell_size_h - 1) for i in range(branching)]
+            return boarder
+        # get back boarder along each dimension
+        boarder_list = [get_boarder(d, b) for d, b in zip(dim_lens, branchings)]
+
+        try:
+            # use quick_product to calculate crossproduct if all dimensions breaks into the same shape
+            lower, upper = np.array(boarder_list).transpose([2,0,1])
+            lower_list = HierarchicalRanges.quick_product(*lower).T
+            upper_list = HierarchicalRanges.quick_product(*upper).T
+        except ValueError:
+            # else fall back to standard crossproduct, will be slower when results size get large
+            x = np.array(list(itertools.product(*boarder_list)))
+            lower_list, upper_list = x.transpose([2,0,1])
+        
+        lower_list = lower_list + cur_range_l
+        upper_list = upper_list + cur_range_l
+        return lower_list, upper_list
+
+    @staticmethod
+    def ranges_gen(start_range_l, start_range_u, include_root, include_leaf, split_func, **kwargs):
+        '''
+        Fast Hierarchical range generation method by iteratively partitioning the domain and 
+        resusing subpartition of the same shape. At each level, only one canonical range is stored for all 
+        ranges of the same shape, and any range is represented as a offset. 
+        
+        start_range_l, start_range_u: lower and upper boundaries of top level range to start with
+        include_root: include the root node(start_range) if set to True 
+        include_leave: include the leaf nodes(cells of size 1) if set to True
+        split_func: spliting function at each level, takes parameter (cur_range_l, cur_range_u, **kwargs)
+                    cur_range_l, cur_range_u are the lower and upper boundardy of the range to be split.
+        **kwargs: argument list, will be passed into split_func
+        Return: list of lower and upper bound
+
+        '''
+        # Avoid doing recursion, python is notoriously bad at it
+        assert len(start_range_l) == len(start_range_u), \
+                "Dimesions of lower and upper boundaries shoud match"
+        pending_l, pending_u = [start_range_l], [start_range_u]
+        dimension = len(start_range_l)
+        # List of pending offsets: dimension, level, duplicates within level.
+        pending_offsets = [[[np.array([0], dtype='int')]] * dimension] if include_root \
+                        else [[[np.array([], dtype='int')]] * dimension]
+        selected_ranges_l, selected_ranges_u = [], [] 
+        while len(pending_l) != 0:
+            cur_range_l = pending_l.pop()
+            cur_range_u = pending_u.pop()
+            cur_offset = pending_offsets.pop()
+            # Resolve offsets in any pending ranges
+            lower, higher = HierarchicalRanges.expand_offsets(cur_range_l, cur_range_u, cur_offset)
+            selected_ranges_l.extend(lower)
+            selected_ranges_u.extend(higher) 
+            sub_ranges_l, sub_ranges_u = split_func(cur_range_l, cur_range_u, **kwargs)
+            # Put subranges of same shapes into groups, select the first subrect as canonical 
+            # and represent the rest using offsets. 
+            same_shape_groups = HierarchicalRanges.same_shape(sub_ranges_l, sub_ranges_u)
+            for group_idx in same_shape_groups:
+                sub_ranges_l_group = np.array(sub_ranges_l)[group_idx]
+                sub_ranges_u_group = np.array(sub_ranges_u)[group_idx]
+                # Select the first range as the canonical range of the group
+                canonical_range_l, canonical_range_u = sub_ranges_l_group[0], sub_ranges_u_group[0]
+                canonical_shape = [ u-l+1 for l,u in zip(canonical_range_l, canonical_range_u)]
+                # If it's a leaf don't add to pending rects,
+                # append Identity at the end of selection.
+                if np.prod(canonical_shape) > 1:
+                    new_offset = []
+                    for d in range(len(cur_offset)):
+                        offset_level = np.array(sub_ranges_l_group)[:, d] - canonical_range_l[d]
+                        # augment offset list by one level for each dimension
+                        new_offset.append(cur_offset[d] + [offset_level])
+                    # append the first quad in subgroup to pending list
+                    pending_l.append(sub_ranges_l_group[0])
+                    pending_u.append(sub_ranges_u_group[0])
+                    pending_offsets.append(new_offset)
+                elif include_leaf:
+                    # if include_leaf is set, then add to selected
+                    selected_ranges_l.extend(sub_ranges_l_group)
+                    selected_ranges_u.extend(sub_ranges_u_group)
+        lower = np.array(selected_ranges_l, dtype=np.int32)
+        upper = np.array(selected_ranges_u, dtype=np.int32)
+        return lower, upper
+
+    def select(self):
+        dimension = len(self.domain_shape)
+        start_range_l = [0] * dimension
+        start_range_u = [d - 1 for d in self.domain_shape]
+
+        lower, upper = HierarchicalRanges.ranges_gen(
+                                                    start_range_l, 
+                                                    start_range_u,
+                                                    self.include_root, 
+                                                    False, 
+                                                    self.split_func, 
+                                                    **self.kwargs)
+
+        # If all selected queries are leaves, return Identity directly
+        if len(lower) == 0:
+            return  matrix.Identity(np.prod(self.domain_shape))
+        # Otherwise union M with Identity
+        M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
+        return matrix.VStack([M, matrix.Identity(np.prod(self.domain_shape))])
+
+
+class H2(HierarchicalRanges):
+    ''' 
+    H2 select operator(ND): 
+    Adds hierarchical queries with uniform branching factor.
+    Works in an iterative top-down fashion splits each node V to create max{b, |V|} children and stops
+    when a node has 1 element. This creates a balanced tree with maximum number of nodes at each level
+    except (possibly) the last one.
+    '''
+    def __init__(self, domain_shape, branching=2):
+
+        dimension = len(domain_shape)
+        super(H2, self).__init__(domain_shape=domain_shape,
+                                 include_root=True,
+                                 split_func=H2.grid_split_range,
+                                 branching_list=[branching]*dimension)
+
+
+
+class HB(HierarchicalRanges):
+    '''
+    HB select operator(ND)
+    Add hierarchical queries with optimal branching factor, per Qardaji et al.
+    '''
+    def __init__(self, domain_shape, include_root=False):
+
+        dimension = len(domain_shape)
+        branching = HB.find_best_branching(np.prod(domain_shape))
+
+        super(HB, self).__init__(domain_shape=domain_shape,
+                                 include_root=include_root,
+                                 split_func=HB.grid_split_range,
+                                 branching_list=[branching]*dimension)
+
+    @staticmethod
+    def variance(N, b):
+        '''Computes variance given domain of size N
+        and branchng factor b.  Equation 3 from paper.'''
+        h = math.ceil(math.log(N, b))
+        return ( ((b - 1) * h**3) - (util.old_div((2 * (b+1) * h**2), 3)))
+
+    @staticmethod
+    def find_best_branching(N):
+        '''
+        Technique from Qardaji et al. PVLDB 2013.
+        Try all branchings from 2 to N and pick one
+        with minimum variance.
+        N in this context is domain size
+        '''
+        min_v = float('inf')
+        min_b = None
+        for b in range(2,N+1):
+            v = HB.variance(N, b)
+            if v < min_v:
+                min_v = v
+                min_b = b
+        return min_b
+
+
+class QuadTree(HierarchicalRanges):
+    '''
+    QuadTree Selection operator
+
+    '''
+    def __init__(self, domain_shape):
+        assert len(domain_shape) == 2, \
+            "QuadTree selection is defined on 2D"
+        domain_shape = domain_shape
+
+        super(QuadTree, self).__init__(domain_shape=domain_shape,
+                                       include_root=True,
+                                       split_func=QuadTree.quad_split_range)
+
+    @staticmethod
+    def quad_split_range(cur_range_l, cur_range_u, **kwarg):
+        '''
+        Given an rectangular domain represented using boarder cordinates (upper_left, lower_right),
+        it splits it correctly to 4 quads in the midpoints
+        '''
+        ul, lr = cur_range_l, cur_range_u
+        upper, left =  ul
+        lower, right = lr   
+
+        n_rows = lower - upper + 1
+        n_cols = right - left + 1   
+
+        # If ncol is odd, do vert splits in balanced manner
+        col_parity = 0
+        if n_cols % 2:
+            col_parity = 1
+        col_midpoint = left + util.old_div(n_cols, 2)
+        row_midpoint = upper + util.old_div(n_rows, 2)  
+
+        if n_rows == 1:
+            # if x has only one row then do only vertical split
+            row = lr[0]
+            return [ul, (row, col_midpoint)], [(row, col_midpoint - 1), lr]
+
+        if n_cols == 1:
+            # if x has only one col then do only horizontal split
+            col = lr[1]
+            return [ul, (row_midpoint, col)] , [(row_midpoint - 1, col), lr]
+
+        # o/w do both splits
+        q1 = (ul,                                        (row_midpoint - 1, col_midpoint - 1))
+        q2 = ((upper, col_midpoint),                     (row_midpoint - 1, right) )
+        q3 = ((row_midpoint, left),                      (lower, col_midpoint - 1 + col_parity))
+        q4 = ((row_midpoint, col_midpoint + col_parity), lr)
+
+        lower = [coordinates[0] for coordinates in [q1, q2, q3, q4] ]
+        upper = [coordinates[1] for coordinates in [q1, q2, q3, q4] ]
+        return lower, upper
+
 
 
 class Identity(SelectionOperator):
@@ -238,118 +365,6 @@ class Total(SelectionOperator):
     def select(self):
         return workload.Total(self.domain_shape[0])
         #return np.ones((1, self.domain_shape[0]), dtype=np.float)
-
-
-class H2(SelectionOperator):
-    """
-    H2 select operator(1D): 
-    Adds hierarchical queries with uniform branching factor.
-    Works in an iterative top-down fashion splits each node V to create max{b, |V|} children and stops
-    when a node has 1 element. This creates a balanced tree with maximum number of nodes at each level
-    except (possibly) the last one.
-
-    """
-
-    def __init__(self, domain_shape, branching=2):
-        super(H2, self).__init__()
-
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 1, 'Hierarchical selection only supports 1D and 2D domain shapes'
-        assert branching > 1
-        self.branching = branching
-        self.domain_shape = domain_shape
-        self.cache = np.ones((1, 1))
-
-    def select(self):
-        if self.domain_shape[0] == self.cache.shape[1]:
-            h_queries = self.cache
-        else:
-            h_queries = buildHierarchical_sparse(self.domain_shape[0], self.branching)
-
-        return matrix.EkteloMatrix(h_queries)
-
-
-class HB(SelectionOperator):
-    '''
-    HB select operator(1D and 2D)
-    Add hierarchical queries with optimal branching factor, per Qardaji et al.
-    '''
-
-    def __init__(self, domain_shape):
-        super(HB, self).__init__()
-
-        assert (isinstance(domain_shape, tuple) and len(domain_shape) == 1
-                or len(domain_shape) == 2
-                ), 'HB selection only supports 1D and 2D domain shapes'
-        self.domain_shape = domain_shape
-
-    @staticmethod
-    def Hb2D(n, m, b_h, b_v):
-        ''' Implementation of Hb for 2D histograms
-                (n,m): the shape of x
-                b_v, b_h = the vertical and horizontal branching factorr respectively
-        '''
-        # Avoid doing recursion, python is notoriously bad at it
-        pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
-        # Avoid calculating partition for quads of the same shape
-        # by storing a base quad and a list of offset in each level of the hierarchy 
-        pending_offsets_h, pending_offsets_v = [[[]]], [[[]]]
-        # HB doesn't include the root node
-        selected_rects_l, selected_rects_u = [], [] 
-        while len(pending_l) != 0:
-            cur_rect_l = pending_l.pop()
-            cur_rect_u = pending_u.pop()
-            offset_h = pending_offsets_h.pop()
-            offset_v = pending_offsets_v.pop()
-            # resolve offsets in any pending ranges
-            lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
-            selected_rects_l.extend(lower)
-            selected_rects_u.extend(higher) 
-
-            sub_rects_l, sub_rects_u = split_rectangle((cur_rect_l, cur_rect_u), b_h, b_v)
-            same_shape_groups = same_shape(sub_rects_l, sub_rects_u)    
-
-            for group_idx in same_shape_groups:
-                sub_rects_l_group = np.array(sub_rects_l)[group_idx]
-                sub_rects_u_group = np.array(sub_rects_u)[group_idx]
-                # If it's a leaf don't add to pending rects,
-                # append Identity at the end of selection.
-                if (sub_rects_u_group[0][0] - sub_rects_l_group[0][0] + 1) * \
-                   (sub_rects_u_group[0][1] - sub_rects_l_group[0][1] + 1) > 1: 
-
-                    offset_h_level, offset_v_level = [], []
-                    for l,u in sub_rects_l_group:
-                        offset_h_level.append(l - sub_rects_l_group[0][0])
-                        offset_v_level.append(u - sub_rects_l_group[0][1])
-                    # append the first quad in subgroup to pending list
-                    pending_l.append(sub_rects_l_group[0])
-                    pending_u.append(sub_rects_u_group[0])
-                    pending_offsets_h.append(offset_h + [offset_h_level])
-                    pending_offsets_v.append(offset_v + [offset_v_level])   
-
-        lower = np.array(selected_rects_l, dtype=np.int32)
-        upper = np.array(selected_rects_u, dtype=np.int32)
-        M = workload.RangeQueries((n,m), lower, upper, np.float32)  
-
-        return matrix.VStack([M, matrix.Identity(n*m)])
-
-    def select(self):
-        if len(self.domain_shape) == 1:
-
-            N = self.domain_shape[0]
-            branching = find_best_branching(N)
-            # remove root
-            h_queries = buildHierarchical_sparse(N, branching).tocsr()[1:]
-            h_queries = matrix.EkteloMatrix(h_queries)
-
-        elif len(self.domain_shape) == 2:
-            N = self.domain_shape[0] * self.domain_shape[1]
-            branching = find_best_branching(N)
-            h_queries = HB.Hb2D(self.domain_shape[0], 
-                             self.domain_shape[1],
-                             branching, 
-                             branching)
-        return h_queries
 
 
 class GreedyH(SelectionOperator):
@@ -456,107 +471,7 @@ class GreedyH(SelectionOperator):
             [[offset, offset + n - 1]] + list(itertools.chain(*sq))
 
 
-class QuadTree(SelectionOperator):
 
-    def __init__(self, domain_shape):
-        super(QuadTree, self).__init__()
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 2, "QuadTree selection only workss for 2D"
-        self.domain_shape = domain_shape
-
-    @staticmethod
-    def rect_to_quads(rect_range):
-        '''
-        Given an rectangular domain represented using boarder cordinates (upper_left, lower_right),
-        it splits it correctly to 4 quads in the midpoints
-        '''
-        ul, lr = rect_range
-        upper, left =  ul
-        lower, right = lr   
-
-        n_rows = lower - upper + 1
-        n_cols = right - left + 1   
-
-        # If ncol is odd, do vert splits in balanced manner
-        col_parity = 0
-        if n_cols % 2:
-            col_parity = 1
-        col_midpoint = left + util.old_div(n_cols, 2)
-        row_midpoint = upper + util.old_div(n_rows, 2)  
-
-        if n_rows == 1:
-            # if x has only one row then do only vertical split
-            row = lr[0]
-            return [ul, (row, col_midpoint)], [(row, col_midpoint - 1), lr]
-
-        if n_cols == 1:
-            # if x has only one col then do only horizontal split
-            col = lr[1]
-            return [ul, (row_midpoint, col)] , [(row_midpoint - 1, col), lr]
-
-        # o/w do both splits
-        q1 = (ul,                                        (row_midpoint - 1, col_midpoint - 1))
-        q2 = ((upper, col_midpoint),                     (row_midpoint - 1, right) )
-        q3 = ((row_midpoint, left),                      (lower, col_midpoint - 1 + col_parity))
-        q4 = ((row_midpoint, col_midpoint + col_parity), lr)
-
-        lower = [coordinates[0] for coordinates in [q1, q2, q3, q4] ]
-        upper = [coordinates[1] for coordinates in [q1, q2, q3, q4] ]
-
-        return lower, upper
-
-
-    @staticmethod
-    def quadtree(n, m):
-        ''' Quadtree function, accepts a shape (n, m)
-            and returns a set of measurements in sparse format on the expanded x vector
-            n and m can be arbitrary numbers
-        '''
-        # Avoid doing recursion, python is notoriously bad at it
-        pending_l, pending_u = [ (0, 0) ], [(n - 1, m - 1)]
-        # Avoid calculating partition for quads of the same shape
-        # by storing a base quad and a list of offset in each level of the hierarchy 
-        pending_offsets_h, pending_offsets_v = [[[0]]], [[[0]]]
-        selected_rects_l, selected_rects_u = [], [] 
-        while len(pending_l) != 0:
-            cur_rect_l = pending_l.pop()
-            cur_rect_u = pending_u.pop()
-            offset_h = pending_offsets_h.pop()
-            offset_v = pending_offsets_v.pop()
-            # resolve offsets in any pending ranges
-            lower, higher = expand_offsets(cur_rect_l, cur_rect_u, offset_h, offset_v)
-            selected_rects_l.extend(lower)
-            selected_rects_u.extend(higher)
-
-            sub_rects_l, sub_rects_u = QuadTree.rect_to_quads((cur_rect_l, cur_rect_u))
-            same_shape_groups = same_shape(sub_rects_l, sub_rects_u)
-
-            for group_idx in same_shape_groups:
-                sub_rects_l_group = np.array(sub_rects_l)[group_idx]
-                sub_rects_u_group = np.array(sub_rects_u)[group_idx]
-                # If it's a leaf don't add to pending rects,
-                # append Identity at the end of selection.
-                if (sub_rects_u_group[0][0] - sub_rects_l_group[0][0] + 1) * \
-                   (sub_rects_u_group[0][1] - sub_rects_l_group[0][1] + 1) > 1:
-
-                    offset_h_level, offset_v_level = [], []
-                    for l,u in sub_rects_l_group:
-                        offset_h_level.append(l - sub_rects_l_group[0][0])
-                        offset_v_level.append(u - sub_rects_l_group[0][1])
-                    # append the first quad in subgroup to pending list
-                    pending_l.append(sub_rects_l_group[0])
-                    pending_u.append(sub_rects_u_group[0])
-                    pending_offsets_h.append(offset_h + [offset_h_level])
-                    pending_offsets_v.append(offset_v + [offset_v_level])
-    
-        lower = np.array(selected_rects_l, dtype=np.int32)
-        upper = np.array(selected_rects_u, dtype=np.int32)
-        M = workload.RangeQueries((n,m), lower, upper, np.float32)
-
-        return matrix.VStack([M, matrix.Identity(n*m)])
-
-    def select(self):
-        return QuadTree.quadtree(self.domain_shape[0], self.domain_shape[1])
 
 class UniformGrid(SelectionOperator):
 
