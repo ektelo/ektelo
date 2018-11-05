@@ -126,7 +126,8 @@ class LeastSquares(InferenceOperator):
 
         if self.method == 'standard':
             assert self.l2_reg == 0, 'l2 reg not supported with method=standard'
-            (x_est, _, rank, _) = linalg.lstsq(A.dense_matrix(), y, lapack_driver='gelsy')
+            A = A.dense_matrix() if not isinstance(A, np.ndarray) else A
+            (x_est, _, rank, _) = linalg.lstsq(A, y, lapack_driver='gelsy')
         elif self.method == 'lsmr':
             res = lsmr(A, y, atol=0, btol=0, damp=self.l2_reg)
             x_est = res[0]
