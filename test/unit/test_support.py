@@ -9,19 +9,6 @@ class TestSupport(unittest.TestCase):
     def setUp(self):
         self.mapping = np.array([0,3,4,1,2,0,1,4,3,2])
 
-    def test_split_rectangle(self):
-        rows = 4
-        cols = 3
-        M = np.ones((rows, cols))
-
-        np.testing.assert_array_equal(sum(support.split_rectangle(M, 1, 1)), M)
-
-        np.testing.assert_array_equal(sum(support.split_rectangle(M, 2, 2)),
-                                      np.array([[4, 4], [4, 4]]))
-
-        np.testing.assert_array_equal(sum(support.split_rectangle(M, 4, 3)),
-                                      np.array([[12]]))
-
     def test_get_partition_vec(self):
         n = 8
         rank = list(range(n))

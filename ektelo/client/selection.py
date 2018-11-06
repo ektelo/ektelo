@@ -521,12 +521,11 @@ class UniformGrid(SelectionOperator):
         return workload.RangeQueries((n, m), np.array(lower), np.array(upper))
 
 
-class AdaptiveGrid(SelectionOperator):
+class AdaptiveGrid(HierarchicalRanges):
 
     def __init__(self, domain_shape, x_hat, eps_par, c2=5):
         assert isinstance(domain_shape, tuple) and len(
             domain_shape) == 2, "AdptiveGrid selection only works for 2D"
-        super(AdaptiveGrid, self).__init__()
 
         self.domain_shape = domain_shape
         self.x_hat = x_hat
@@ -560,7 +559,7 @@ class AdaptiveGrid(SelectionOperator):
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
 
             # generate cell and pending queries base on new celss
-            lower, higher = split_rectangle(((0,0), (nn - 1, mm - 1)), num1, num2)
+            lower, higher = AdaptiveGrid.grid_split_range( (0,0), (nn - 1, mm - 1) , branching_list=[num1, num2])
             
         return workload.RangeQueries(self.domain_shape, np.array(lower), np.array(higher))
 

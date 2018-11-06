@@ -41,7 +41,7 @@ class TestPlans(unittest.TestCase):
         self.W_cps.dot(x_hat)
 
     def test_h2(self):
-        x_hat = standalone.H2().Run(self.W_cps,
+        x_hat = standalone.H2(self.cps_domain).Run(self.W_cps,
                                     self.x_cps,
                                     self.eps,
                                     self.seed)
@@ -144,8 +144,9 @@ class TestPlans(unittest.TestCase):
         self.W_stroke.dot(x_hat)
 
     def test_quad_tree(self):
+        x = self.x_cps.reshape((len(self.x_cps) // 2, 2))
         x_hat = standalone.QuadTree().Run(self.W_cps,
-                                          self.x_cps,
+                                          x,
                                           self.eps,
                                           self.seed)
         self.W_cps.dot(x_hat)
