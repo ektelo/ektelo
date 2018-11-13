@@ -3,6 +3,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lsqr
 from functools import reduce
+import math
 
 class EkteloMatrix(LinearOperator):
     """
@@ -324,6 +325,49 @@ class Kronecker(EkteloMatrix):
  
     def __abs__(self):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
+
+class Haar(EkteloMatrix):
+    def __init__(self, n, dtype = np.float64):
+        self.n = n
+        self.k = int(math.log(n, 2))
+        assert 2**self.k == n, 'n must be a power of 2'
+        self.shape = (n,n)
+        self.dtype = dtype
+
+    def _matmat(self, X):
+        y = X.copy()
+        n = self.n
+        for _ in range(self.k):
+            y[:n] = np.vstack([y[:n][0::2] + y[:n][1::2], y[:n][0::2] - y[:n][1::2]])
+            n = n // 2
+        return y
+
+    def _rmatvec(self, y):
+        # can implement this instead of _transpose
+        x = y.copy()
+        m = 1
+        for _ in range(self.k):
+            n = 2*m
+            # be careful here, don't separate into two calls
+            x[0:n:2], x[1:n:2] = x[:m] + x[m:n], x[:m] - x[m:n]
+            m *= 2
+        return x
+
+    def _transpose(self):
+        return LinearOperator._adjoint(self)
+
+    def sensitivity(self):
+        return self.k + 1.0
+
+    @property
+    def matrix(self):
+        H = sparse.eye(1, format='csr')
+        for m in [2**c for c in range(self.k)]:
+            I = sparse.eye(m, format='csr')
+            A = sparse.kron(H, [1,1], format='csr')
+            B = sparse.kron(I, [1,-1], format='csr')
+            H = sparse.vstack([A,B], format='csr')
+        return H
 
 class _LazyProduct(EkteloMatrix):
     def __init__(self, A, B):

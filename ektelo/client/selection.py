@@ -563,99 +563,22 @@ class AdaptiveGrid(HierarchicalRanges):
             
         return workload.RangeQueries(self.domain_shape, np.array(lower), np.array(higher))
 
-
 class Wavelet(SelectionOperator):
     '''
     Adds wavelet matrix as measurements
     '''
-    #TODO: handle 2D
 
     def __init__(self, domain_shape):
         super(Wavelet, self).__init__()
 
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 1, 'Wavelet selection only supports 1D  domain shapes'
-
         self.domain_shape = domain_shape
-
-
-    @staticmethod
-    def wavelet_sparse(n):
-        '''
-        Returns a sparse (csr_matrix) wavelet matrix of size n = 2^k
-        '''
-        if n == 1:
-            return sparse.identity(1, format='csr')
-        m, r = divmod(n, 2)
-        assert r == 0, 'n must be power of 2'
-        H2 = Wavelet.wavelet_sparse(m)
-        I2 = sparse.identity(m, format='csr')
-        A = sparse.kron(H2, [1,1])
-        B = sparse.kron(I2, [1,-1])
-        return sparse.vstack([A,B])
-
-    @staticmethod
-    def remove_duplicates(a):
-        ''' 
-        Removes duplicate rows from a 2d numpy array
-        '''
-        a = np.ascontiguousarray(a)
-        unique_a = np.unique(a.view([('', a.dtype)]*a.shape[1]))
-        return unique_a.view(a.dtype).reshape((unique_a.shape[0], a.shape[1]))[::-1]
-
-    @staticmethod
-    def power(n, b):
-        '''
-        Helper function for domain sizes and branching
-        Returns exponent exp such that n == b ** exp when n is a power of b
-        Otherwise returns closest exp and remainder, so that n == b ** exp + rem
-        '''
-        exp = int(math.log(n, b))
-        rem = n - (b ** exp)
-        return exp, rem
-    
-    @staticmethod
-    def wavelets(n):
-        """
-        can deal with domain sizes that are not powers of 2
-        """
-        height, rem = Wavelet.power(n, 2)
-        diff = 0
-        if rem != 0:
-            height += 1
-            diff    = 2 ** (height) - n
-            n       = 2 ** (height)
-        M = [np.ones(n)]
-        step = 2*n
-        for h in range(height):
-            n_nodes = 2 ** h
-            step //= 2
-            for node in range(n_nodes):
-                x     = np.zeros(n)
-                start = node * step
-                mid   = int ((node + 0.5) * step)
-                end   = (node + 1)   * step
-
-                x[start:mid] =  1
-                x[mid:end]   = -1
-                M.append(x)
-        M = np.delete(M, np.arange(diff) + n - diff ,  axis = 1)
-        if rem!= 0:
-            M = Wavelet.remove_duplicates(M)
-        return M
-
+        assert all(n & (n-1) == 0 for n in domain_shape),\
+                'each dimension of domain must be a power of 2'
 
     def select(self):
-        n = self.domain_shape[0]
-
-        if (n != 0 and ((n) & (n-1)) ==0):
-            # if power of 2
-            wavelet_query = Wavelet.wavelet_sparse(n)
-        else:
-            wavelet_query = Wavelet.wavelets(n)
-
-        return matrix.EkteloMatrix(wavelet_query)
-
+        if len(self.domain_shape) == 1:
+            return matrix.Haar(self.domain_shape[0])
+        return matrix.Kronecker([matrix.Haar(n) for n in self.domain_shape])
 
 class AddEquiWidthIntervals(SelectionOperator):
     """
