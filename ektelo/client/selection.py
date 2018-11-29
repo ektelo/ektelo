@@ -563,6 +563,22 @@ class AdaptiveGrid(HierarchicalRanges):
             
         return workload.RangeQueries(self.domain_shape, np.array(lower), np.array(higher))
 
+class HD_IHB(SelectionOperator):
+    '''
+    fast global selection for HB_STRIPED
+    '''
+    def __init__(self, domain_shape, hb_dim=-1):
+        self.init_params = util.init_params_from_locals(locals())
+        self.domain_shape = domain_shape
+        self.hb_dim = hb_dim # default to last dimension
+
+    def select(self):
+        queries = [matrix.Identity(n) for n in self.domain_shape]
+        N = self.domain_shape[self.hb_dim]
+        queries[self.hb_dim] = HB((N,)).select()
+
+        return matrix.Kronecker(queries)
+
 class Wavelet(SelectionOperator):
     '''
     Adds wavelet matrix as measurements

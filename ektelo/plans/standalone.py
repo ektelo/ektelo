@@ -645,6 +645,22 @@ class StripedHB(Base):
 
         return x_hat
 
+class StripedHB_fast(Base):
+
+    def __init__(self, domain, stripe_dim):
+        self.init_params = util.init_params_from_locals(locals())
+        self.domain = domain
+        self.stripe_dim = stripe_dim
+        super().__init__()
+
+    def Run(self, W, x, eps, seed):
+        x = x.flatten()            
+        prng = np.random.RandomState(seed)
+        M = selection.HD_IHB(x.shape, self.stripe_dim).select()
+        y  = measurement.Laplace(M, eps).measure(x, prng)
+        x_hat = inference.LeastSquares().infer(M, y)
+
+        return x_hat
 
 class MwemVariantB(Base):
 
