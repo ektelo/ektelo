@@ -573,11 +573,14 @@ class HD_IHB(SelectionOperator):
         self.hb_dim = hb_dim # default to last dimension
 
     def select(self):
-        queries = [matrix.Identity(n) for n in self.domain_shape]
         N = self.domain_shape[self.hb_dim]
-        queries[self.hb_dim] = HB((N,)).select()
+        H = HB((N,)).select()
+        domains = list(self.domain_shape)
 
-        return matrix.Kronecker(queries)
+        del domains[self.hb_dim]
+        I = matrix.Identity(int(np.prod(domains)))
+
+        return matrix.Kronecker([I, H])
 
 class Wavelet(SelectionOperator):
     '''
