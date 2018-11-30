@@ -290,7 +290,7 @@ class Kronecker(EkteloMatrix):
         self.dtype = np.result_type(*[Q.dtype for Q in matrices])
 
     def _matmat(self, V):
-        X = V
+        X = V.T
         for Q in self.matrices[::-1]:
             m,n = Q.shape
             X = Q.dot(X.reshape(-1, n).T)
