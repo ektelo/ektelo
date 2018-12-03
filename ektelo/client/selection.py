@@ -567,18 +567,26 @@ class HD_IHB(SelectionOperator):
     '''
     fast global selection for HB_STRIPED
     '''
-    def __init__(self, domain_shape, hb_dim=-1):
+    def __init__(self, domain_shape, impl='MM', hb_dim=-1):
         self.init_params = util.init_params_from_locals(locals())
         self.domain_shape = domain_shape
+        self.impl = impl
         self.hb_dim = hb_dim # default to last dimension
 
     def select(self):
         N = self.domain_shape[self.hb_dim]
-        H = HB((N,)).select()
         domains = list(self.domain_shape)
-
         del domains[self.hb_dim]
-        I = matrix.Identity(int(np.prod(domains)))
+
+        if self.impl == 'MM':
+            I = matrix.Identity(int(np.prod(domains)))
+            H = HB((N,)).select()
+        elif self.impl == 'sparse':
+            I = matrix.Identity(int(np.prod(domains))).sparse_matrix()
+            H = HB((N,)).select().sparse_matrix()
+        elif self.impl == 'dense':
+            I = matrix.Identity(int(np.prod(domains))).dense_matrix()
+            H = HB((N,)).select().dense_matrix()
 
         return matrix.Kronecker([I, H])
 

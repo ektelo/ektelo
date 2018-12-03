@@ -645,22 +645,29 @@ class StripedHB(Base):
 
         return x_hat
 
-class StripedHB_fast(Base):
 
-    def __init__(self, domain, stripe_dim):
+class StripedHB_fast(Base):
+    '''
+    More efficient implementation of Striped_HB.
+    Measure a global Kron of HB on striped domain and Identity on others,
+    logical equivalent to StripedHB_fast and Striped_HB.
+
+    '''
+    def __init__(self, domain, impl='MM', stripe_dim=-1):
         self.init_params = util.init_params_from_locals(locals())
         self.domain = domain
+        self.impl = impl
         self.stripe_dim = stripe_dim
         super().__init__()
 
     def Run(self, W, x, eps, seed):
         x = x.flatten()            
         prng = np.random.RandomState(seed)
-        M = selection.HD_IHB(self.domain, self.stripe_dim).select()
+        M = selection.HD_IHB(self.domain, self.impl, self.stripe_dim).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
-
         return x_hat
+        
 
 class MwemVariantB(Base):
 
