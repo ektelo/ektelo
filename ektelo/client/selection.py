@@ -12,7 +12,7 @@ import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
-from ektelo import matrix, workload
+from ektelo import matrix, workload, hdmm_templates
 from functools import reduce
 
 
@@ -337,7 +337,37 @@ class QuadTree(HierarchicalRanges):
         upper = [coordinates[1] for coordinates in [q1, q2, q3, q4] ]
         return lower, upper
 
+class HDMM1D(SelectionOperator):
+    def __init__(self, W, p=None):
+        self.W = W
+        self.n = W.shape[1]
+        self.p = p
+        if p is None:
+            self.p = self.n // 16
+    
+    def select(self):
+        pid = hdmm_templates.PIdentity(self.p, self.n)
+        pid.optimize(self.W)
+        return pid.strategy()
 
+class HDMM(SelectionOperator):
+    def __init__(self, domain_shape, W, ps):
+        """ only works for kronecker product or union of kron W
+        ps is hyperparameter to HDMM, must be same length as # dimensions
+
+        Example Usage:
+        P = workload.Prefix(32)
+        W = workload.Kronecker([P, P])
+        sel = selection.HDMM([32,32], W, [2,2])
+        M = sel.select()
+        """
+        self.W = W 
+        self.domain_shape = domain_shape
+        self.template = hdmm_templates.KronPIdentity(ps, domain_shape)
+
+    def select(self):
+        self.template.optimize(self.W)
+        return self.template.strategy()
 
 class Identity(SelectionOperator):
 

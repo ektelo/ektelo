@@ -6,7 +6,7 @@ import numpy as np
 from functools import reduce
 import itertools
 
-class TemplateStrategy(matrix.EkteloMatrix):
+class TemplateStrategy:
 
     def strategy(self):
         pass
