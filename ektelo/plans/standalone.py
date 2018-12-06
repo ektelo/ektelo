@@ -737,6 +737,7 @@ class MwemVariantC(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        x = x.flatten()
         prng = np.random.RandomState(seed)
 
         domain_size = np.prod(self.domain_shape)
@@ -792,6 +793,7 @@ class MwemVariantD(Base):
         super().__init__()
 
     def Run(self, W, x, eps, seed):
+        x = x.flatten()
         prng = np.random.RandomState(seed)
 
         domain_size = np.prod(self.domain_shape)
