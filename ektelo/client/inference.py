@@ -10,7 +10,7 @@ from ektelo import util
 from ektelo.operators import InferenceOperator
 import cvxopt
 
-def nnls(A, y, l1_reg=0.0, l2_reg=0.0, maxiter = 15000):
+def nnls(A, y, l1_reg=0, l2_reg=0, maxiter = 15000):
     """
     Solves the NNLS problem min || Ax - y || s.t. x >= 0 using gradient-based optimization
     :param A: numpy matrix, scipy sparse matrix, or scipy Linear Operator
@@ -142,8 +142,10 @@ class NonNegativeLeastSquares(InferenceOperator):
     Note: undefined behavior when system is under-constrained
     '''
 
-    def __init__(self):
+    def __init__(self, l1_reg=0, l2_reg=0):
         super(NonNegativeLeastSquares, self).__init__()
+        self.l1_reg = l1_reg
+        self.l2_reg = l2_reg
 
     def infer(self, Ms, ys, scale_factors=None):
         ''' Either:
@@ -154,7 +156,7 @@ class NonNegativeLeastSquares(InferenceOperator):
         '''
         A, y = _apply_scales(Ms, ys, scale_factors)
 
-        x_est, info = nnls(A, y)
+        x_est, info = nnls(A, y, self.l1_reg, self.l2_reg)
 
         return x_est
 
