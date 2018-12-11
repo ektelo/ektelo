@@ -56,8 +56,8 @@ def laplace_scale_factor(M, eps):
     return cmeasurement.laplace_scale_factor(M, eps)
 
 
-def non_negative_least_squares(Ms, ys, scale_factors=None):
-    return inference.NonNegativeLeastSquares().infer(Ms, ys, scale_factors)
+def non_negative_least_squares(Ms, ys, l1_reg = 0, l2_reg =0, scale_factors=None):
+    return inference.NonNegativeLeastSquares(l1_reg, l2_reg).infer(Ms, ys, scale_factors)
 
 
 def ugrid_mapper(shape, x_sum, eps, ag_flag=False, c=10, gz=0):
@@ -66,6 +66,9 @@ def ugrid_mapper(shape, x_sum, eps, ag_flag=False, c=10, gz=0):
 
 def striped(domain, stripe_dim):
     return mapper.Striped(domain, stripe_dim).mapping()
+
+def striped_partition(domain, stripe_dim):
+    return mapper.Striped(domain, stripe_dim).partitions()
 
 def hilbert(domain):
     return mapper.HilbertTransform(domain).mapping()

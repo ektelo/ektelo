@@ -617,7 +617,9 @@ class HD_IHB(SelectionOperator):
         elif self.impl == 'dense':
             I = matrix.Identity(int(np.prod(domains))).dense_matrix()
             H = HB((N,)).select().dense_matrix()
-
+        else:
+            print("Invalid measurement type", self.impl)
+            exit(1)
         return matrix.Kronecker([I, H])
 
 class Wavelet(SelectionOperator):

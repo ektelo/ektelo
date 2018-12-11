@@ -398,7 +398,6 @@ class UGrid(Base):
 
         return x_hat
 
-
 class AGrid(Base):
     """
     W. Qardaji, W. Yang, and N. Li. Differentially private grids for geospatial data. ICDE, 2013.
@@ -415,6 +414,7 @@ class AGrid(Base):
 
     def Run(self, W, x, eps, seed):
         assert len(x.shape) == 2, "Adaptive Grid only works for 2D domain"
+
         shape_2d = x.shape
         x = x.flatten()
         prng = np.random.RandomState(seed)
@@ -426,8 +426,6 @@ class AGrid(Base):
                                   eps, 
                                   ag_flag=True, 
                                   c=self.c).select()
-
-
         y  = measurement.Laplace(M, self.alpha*eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -444,37 +442,33 @@ class AGrid(Base):
         x_sub_list =  meta.SplitByPartition(uniform_mapping).transform(x)
         sub_domains = support.get_subdomain_grid(uniform_mapping, shape_2d)
 
-        ll, hi =[], []
-
         for i in sorted(set(uniform_mapping)):
-
             x_i = x_sub_list[i]
+
             P_i = support.projection_matrix(uniform_mapping, i) 
             x_hat_i =  P_i * x_hat 
 
             sub_domain_shape = sub_domains[i]
+
             M_i = selection.AdaptiveGrid(sub_domain_shape, 
                                          x_hat_i, 
                                          (1-self.alpha)*eps, 
                                          c2=self.c2).select()
-
-
             y_i = measurement.Laplace(M_i, (1-self.alpha)*eps).measure(x_i, prng)
 
-            offset = np.unravel_index(P_i.matrix.nonzero()[1][0], shape_2d)
-            ll.extend(M_i._lower + np.array(offset))
-            hi.extend(M_i._higher + np.array(offset))
+            M_i_o = M_i * P_i
 
+            Ms.append(M_i_o)
             ys.append(y_i)
 
-        Ms.append(workload.RangeQueries(shape_2d, np.array(ll), np.array(hi)))
-        x_hat = inference.LeastSquares().infer(Ms, ys)
+        x_hat = inference.LeastSquares().infer(Ms, ys, [1.0]*len(ys))
 
         return x_hat
 
+
 class DawaStriped(Base):
 
-    def __init__(self, ratio, domain, stripe_dim, approx):
+    def __init__(self, domain, stripe_dim, ratio, approx):
         self.init_params = util.init_params_from_locals(locals())
         self.ratio = ratio
         self.domain = domain
@@ -523,87 +517,6 @@ class DawaStriped(Base):
         return x_hat
 
 
-class DawaStriped_fast(Base):
-
-    def __init__(self, ratio, domain, stripe_dim, approx):
-        self.init_params = util.init_params_from_locals(locals())
-        self.ratio = ratio
-        self.domain = domain
-        self.stripe_dim = stripe_dim
-        self.approx = approx
-        super().__init__()
-
-    def std_project_workload(self, w, mapping, groupID):
-
-        P_i = support.projection_matrix(mapping, groupID)
-        return w * P_i.T
-
-
-    def project_workload(self, w, partition_vectors, hd_vector, groupID):
-        # overriding standard projection for efficiency
-
-        if isinstance(w, workload.Kronecker):
-            combos = list(zip(partition_vectors, w.workloads, self.subgroups[groupID]))
-            # note: for efficiency, p.project_workload should remove 0 and duplicate rows
-            projected = [self.std_project_workload(q, p, g) for p, q, g in combos]
-
-            return reduce(sparse.kron, projected)
-        else:
-            return self.std_project_workload(w, hd_vector.flatten(), groupID)
-
-    def Run(self, W, x, eps, seed):
-        x = x.flatten()            
-        prng = np.random.RandomState(seed)
-
-        striped_vectors = mapper.Striped(self.domain, self.stripe_dim).partitions()
-        hd_vector = support.combine_all(striped_vectors)
-        striped_mapping = hd_vector.flatten()
-
-        x_sub_list = meta.SplitByPartition(striped_mapping).transform(x)
-
-        Ms = []
-        ys = []
-        scale_factors = []
-        group_idx = sorted(set(striped_mapping))
-
-        # Given a group id on the full vector, recover the group id for each partition
-        # put back in loop to save memory
-        self.subgroups = {}
-        for i in group_idx:
-            selected_idx = np.where(hd_vector == i)
-            ans = [p[i[0]] for p, i in zip(striped_vectors, selected_idx)]
-            self.subgroups[i] = ans
-
-        for i in group_idx: 
-            x_i = x_sub_list[group_idx.index(i)]
-            
-            # overwriting standard projection for efficiency
-            W_i = self.project_workload(W, striped_vectors, hd_vector, i)
-
-            dawa = pmapper.Dawa(eps, self.ratio, self.approx)
-            mapping = dawa.mapping(x_i, prng)
-            reducer = transformation.ReduceByPartition(mapping)
-            x_bar = reducer.transform(x_i)
-            W_bar = W_i * support.expansion_matrix(mapping)
-
-            M_bar = selection.GreedyH(x_bar.shape, W_bar).select()
-            y_i = measurement.Laplace(
-                M_bar, eps * (1 - self.ratio)).measure(x_bar, prng)
-
-            noise_scale_factor = laplace_scale_factor(
-                M_bar, eps * (1 - self.ratio))
-
-            # convert the measurement back to the original domain for inference
-            P_i = support.projection_matrix(striped_mapping, i)
-            M_i = (M_bar * support.reduction_matrix(mapping)) * P_i
-
-            Ms.append(M_i)
-            ys.append(y_i)
-            scale_factors.append(noise_scale_factor)
-
-        x_hat = inference.LeastSquares().infer(Ms, ys, scale_factors)
-
-        return x_hat
 
 
 class StripedHB(Base):
@@ -646,27 +559,7 @@ class StripedHB(Base):
         return x_hat
 
 
-class StripedHB_fast(Base):
-    '''
-    More efficient implementation of Striped_HB.
-    Measure a global Kron of HB on striped domain and Identity on others,
-    logical equivalent to StripedHB_fast and Striped_HB.
 
-    '''
-    def __init__(self, domain, impl='MM', stripe_dim=-1):
-        self.init_params = util.init_params_from_locals(locals())
-        self.domain = domain
-        self.impl = impl
-        self.stripe_dim = stripe_dim
-        super().__init__()
-
-    def Run(self, W, x, eps, seed):
-        x = x.flatten()            
-        prng = np.random.RandomState(seed)
-        M = selection.HD_IHB(self.domain, self.impl, self.stripe_dim).select()
-        y  = measurement.Laplace(M, eps).measure(x, prng)
-        x_hat = inference.LeastSquares().infer(M, y)
-        return x_hat
         
 
 class MwemVariantB(Base):
@@ -934,3 +827,181 @@ class HDMarginalsSmart(Base):
         x_hat = inference.LeastSquares(method='lsmr').infer(Ms, ys, scale_factors)
 
         return x_hat  
+
+# Alternative implementations
+class AGrid_fast(Base):
+    """
+    W. Qardaji, W. Yang, and N. Li. Differentially private grids for geospatial data. ICDE, 2013.
+    http://dl.acm.org/citation.cfm?id=2510649.2511274
+    """
+
+    def __init__(self, data_scale, alpha=0.5, c=10, c2=5):
+        self.init_params = util.init_params_from_locals(locals())
+        self.alpha = alpha
+        self.c = c
+        self.c2 = c2
+        self.data_scale = data_scale
+        super().__init__()
+
+    def Run(self, W, x, eps, seed):
+        assert len(x.shape) == 2, "Adaptive Grid only works for 2D domain"
+        shape_2d = x.shape
+        x = x.flatten()
+        prng = np.random.RandomState(seed)
+        Ms = []
+        ys = []
+
+        M = selection.UniformGrid(shape_2d, 
+                                  self.data_scale, 
+                                  eps, 
+                                  ag_flag=True, 
+                                  c=self.c).select()
+
+
+        y  = measurement.Laplace(M, self.alpha*eps).measure(x, prng)
+        x_hat = inference.LeastSquares().infer(M, y)
+
+        Ms.append(M)
+        ys.append(y)
+
+        # Prepare parition object for later SplitByParition.
+        # This Partition selection operator is missing from Figure 2, plan 12 in the paper.
+        uniform_mapping = mapper.UGridPartition(shape_2d, 
+                                                self.data_scale, 
+                                                eps, 
+                                                ag_flag=True, 
+                                                c=self.c).mapping()
+        x_sub_list =  meta.SplitByPartition(uniform_mapping).transform(x)
+        sub_domains = support.get_subdomain_grid(uniform_mapping, shape_2d)
+
+        ll, hi =[], []
+
+        for i in sorted(set(uniform_mapping)):
+
+            x_i = x_sub_list[i]
+            P_i = support.projection_matrix(uniform_mapping, i) 
+            x_hat_i =  P_i * x_hat 
+
+            sub_domain_shape = sub_domains[i]
+            M_i = selection.AdaptiveGrid(sub_domain_shape, 
+                                         x_hat_i, 
+                                         (1-self.alpha)*eps, 
+                                         c2=self.c2).select()
+
+
+            y_i = measurement.Laplace(M_i, (1-self.alpha)*eps).measure(x_i, prng)
+
+            offset = np.unravel_index(P_i.matrix.nonzero()[1][0], shape_2d)
+            ll.extend(M_i._lower + np.array(offset))
+            hi.extend(M_i._higher + np.array(offset))
+
+            ys.append(y_i)
+
+        Ms.append(workload.RangeQueries(shape_2d, np.array(ll), np.array(hi)))
+        x_hat = inference.LeastSquares().infer(Ms, ys)
+
+        return x_hat
+
+class DawaStriped_fast(Base):
+
+    def __init__(self, domain, stripe_dim, ratio, approx):
+        self.init_params = util.init_params_from_locals(locals())
+        self.ratio = ratio
+        self.domain = domain
+        self.stripe_dim = stripe_dim
+        self.approx = approx
+        super().__init__()
+
+    def std_project_workload(self, w, mapping, groupID):
+
+        P_i = support.projection_matrix(mapping, groupID)
+        return w * P_i.T
+
+
+    def project_workload(self, w, partition_vectors, hd_vector, groupID):
+        # overriding standard projection for efficiency
+
+        if isinstance(w, workload.Kronecker):
+            combos = list(zip(partition_vectors, w.workloads, self.subgroups[groupID]))
+            # note: for efficiency, p.project_workload should remove 0 and duplicate rows
+            projected = [self.std_project_workload(q, p, g) for p, q, g in combos]
+
+            return reduce(sparse.kron, projected)
+        else:
+            return self.std_project_workload(w, hd_vector.flatten(), groupID)
+
+    def Run(self, W, x, eps, seed):
+        x = x.flatten()            
+        prng = np.random.RandomState(seed)
+
+        striped_vectors = mapper.Striped(self.domain, self.stripe_dim).partitions()
+        hd_vector = support.combine_all(striped_vectors)
+        striped_mapping = hd_vector.flatten()
+
+        x_sub_list = meta.SplitByPartition(striped_mapping).transform(x)
+
+        Ms = []
+        ys = []
+        scale_factors = []
+        group_idx = sorted(set(striped_mapping))
+
+        # Given a group id on the full vector, recover the group id for each partition
+        # put back in loop to save memory
+        self.subgroups = {}
+        for i in group_idx:
+            selected_idx = np.where(hd_vector == i)
+            ans = [p[i[0]] for p, i in zip(striped_vectors, selected_idx)]
+            self.subgroups[i] = ans
+
+        for i in group_idx: 
+            x_i = x_sub_list[group_idx.index(i)]
+            
+            # overwriting standard projection for efficiency
+            W_i = self.project_workload(W, striped_vectors, hd_vector, i)
+
+            dawa = pmapper.Dawa(eps, self.ratio, self.approx)
+            mapping = dawa.mapping(x_i, prng)
+            reducer = transformation.ReduceByPartition(mapping)
+            x_bar = reducer.transform(x_i)
+            
+            W_bar = W_i * support.expansion_matrix(mapping)
+            M_bar = selection.GreedyH(x_bar.shape, W_bar).select()
+            y_i = measurement.Laplace(
+                M_bar, eps * (1 - self.ratio)).measure(x_bar, prng)
+
+            noise_scale_factor = laplace_scale_factor(
+                M_bar, eps * (1 - self.ratio))
+
+            # convert the measurement back to the original domain for inference
+            P_i = support.projection_matrix(striped_mapping, i)
+            M_i = (M_bar * support.reduction_matrix(mapping)) * P_i
+
+            Ms.append(M_i)
+            ys.append(y_i)
+            scale_factors.append(noise_scale_factor)
+
+        x_hat = inference.LeastSquares().infer(Ms, ys, scale_factors)
+
+        return x_hat
+
+class StripedHB_fast(Base):
+    '''
+    More efficient implementation of Striped_HB.
+    Measure a global Kron of HB on striped domain and Identity on others,
+    logical equivalent to StripedHB_fast and Striped_HB.
+
+    '''
+    def __init__(self, domain, impl='MM', stripe_dim=-1):
+        self.init_params = util.init_params_from_locals(locals())
+        self.domain = domain
+        self.impl = impl
+        self.stripe_dim = stripe_dim
+        super().__init__()
+
+    def Run(self, W, x, eps, seed):
+        x = x.flatten()            
+        prng = np.random.RandomState(seed)
+        M = selection.HD_IHB(self.domain, self.impl, self.stripe_dim).select()
+        y  = measurement.Laplace(M, eps).measure(x, prng)
+        x_hat = inference.LeastSquares().infer(M, y)
+        return x_hat

@@ -169,11 +169,30 @@ class TestPlans(unittest.TestCase):
                                                  self.seed)
         self.W_cps.dot(x_hat)
 
+    def test_agrid_fast(self):
+        data_scale = 1e5
+        x = self.x_cps.reshape((len(self.x_cps) // 2, 2))
+        x_hat = standalone.AGrid_fast(data_scale).Run(self.W_cps,
+                                                 x,
+                                                 self.eps,
+                                                 self.seed)
+        self.W_cps.dot(x_hat)
+
     def test_dawa_striped(self):
         stripe_dim = 0
         ratio = 0.25
         approx = False
-        x_hat = standalone.DawaStriped(ratio, self.cps_domain, stripe_dim, approx).Run(self.W_cps,
+        x_hat = standalone.DawaStriped(self.cps_domain, stripe_dim, ratio, approx).Run(self.W_cps,
+                                                                                       self.x_cps,
+                                                                                       self.eps,
+                                                                                       self.seed)
+        self.W_cps.dot(x_hat)
+
+    def test_dawa_striped_fast(self):
+        stripe_dim = 0
+        ratio = 0.25
+        approx = False
+        x_hat = standalone.DawaStriped_fast( self.cps_domain, stripe_dim, ratio, approx).Run(self.W_cps,
                                                                                        self.x_cps,
                                                                                        self.eps,
                                                                                        self.seed)
@@ -182,6 +201,14 @@ class TestPlans(unittest.TestCase):
     def test_striped_HB_slow(self):
         stripe_dim = 0
         x_hat = standalone.StripedHB(self.cps_domain, stripe_dim).Run(self.W_cps,
+                                                                      self.x_cps,
+                                                                      self.eps,
+                                                                      self.seed)
+        self.W_cps.dot(x_hat)
+
+    def test_striped_HB_fast(self):
+        stripe_dim = 0
+        x_hat = standalone.StripedHB_fast(self.cps_domain, 'MM', stripe_dim).Run(self.W_cps,
                                                                       self.x_cps,
                                                                       self.eps,
                                                                       self.seed)

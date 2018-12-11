@@ -80,8 +80,8 @@ class TestWrapper(unittest.TestCase):
         private.Dawa(self.stroke_domain, ratio, approx).Run(self.W_stroke, x, self.eps)
 
     def test_quad_tree(self):
-        x = self.x_cps.vectorize(self.cps_domain)
-        private.QuadTree(self.cps_domain).Run(self.W_cps, x, self.eps)
+        x = self.x_stroke.vectorize(self.stroke_domain)
+        private.QuadTree(self.stroke_domain).Run(self.W_stroke, x, self.eps)
 
     def test_ugrid(self):
         x = self.x_stroke.vectorize(self.stroke_domain)
@@ -93,18 +93,34 @@ class TestWrapper(unittest.TestCase):
         x = self.x_stroke.vectorize(self.stroke_domain)
         private.AGrid(self.stroke_domain, data_scale).Run(self.W_stroke, x, self.eps)
 
+    def test_agrid_fast(self):
+        data_scale = 1e5
+        x = self.x_stroke.vectorize(self.stroke_domain)
+        private.AGrid_fast(self.stroke_domain, data_scale).Run(self.W_stroke, x, self.eps)
+
     def test_dawa_striped(self):
         stripe_dim = 0
         ratio = 0.25
         approx = False
-        rounds = 3
         x = self.x_cps.vectorize(self.cps_domain)
-        private.DawaStriped(self.cps_domain, stripe_dim, ratio, rounds, approx).Run(self.W_cps, x, self.eps)
+        private.DawaStriped(self.cps_domain, stripe_dim, ratio, approx).Run(self.W_cps, x, self.eps)
+    
+    def test_dawa_striped_fast(self):
+        stripe_dim = 0
+        ratio = 0.25
+        approx = False
+        x = self.x_cps.vectorize(self.cps_domain)
+        private.DawaStriped_fast(self.cps_domain, stripe_dim, ratio, approx).Run(self.W_cps, x, self.eps)
 
     def test_striped_HB_slow(self):
         stripe_dim = 0
         x = self.x_cps.vectorize(self.cps_domain)
         private.StripedHB(self.cps_domain, stripe_dim).Run(self.W_cps, x, self.eps)
+
+    def test_striped_HB_fast(self):
+        stripe_dim = 0
+        x = self.x_cps.vectorize(self.cps_domain)
+        private.StripedHB_fast(self.cps_domain, 'MM', stripe_dim).Run(self.W_cps, x, self.eps)
 
     def test_mwem_variant_b(self):
         ratio = 0.5
