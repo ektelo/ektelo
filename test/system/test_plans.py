@@ -34,7 +34,7 @@ class TestPlans(unittest.TestCase):
         self.W_cps.dot(x_hat)
 
     def test_privelet(self):
-        x_hat = standalone.Privelet().Run(self.W_stroke,
+        x_hat = standalone.Privelet(self.stroke_domain).Run(self.W_stroke,
                                           self.x_stroke,
                                           self.eps,
                                           self.seed)

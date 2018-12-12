@@ -21,6 +21,10 @@ class TestWrapper(unittest.TestCase):
         x = self.x_cps.vectorize(self.cps_domain)
         private.Identity(self.cps_domain).Run(self.W_cps, x, self.eps)
 
+    def test_privelet(self):
+        x = self.x_stroke.vectorize(self.stroke_domain)
+        private.Privelet(self.stroke_domain).Run(self.W_stroke, x, self.eps)
+
     def test_h2(self):
         x = self.x_cps.vectorize(self.cps_domain)
         private.H2(self.cps_domain).Run(self.W_cps, x, self.eps)

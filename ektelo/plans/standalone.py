@@ -49,14 +49,15 @@ class Privelet(Base):
     http://dl.acm.org/citation.cfm?id=2007020
     """
 
-    def __init__(self):
+    def __init__(self, domain_shape):
         self.init_params = {}
+        self.domain_shape = domain_shape
         super().__init__()
 
     def Run(self, W, x, eps, seed):
         x = x.flatten()
         prng = np.random.RandomState(seed)
-        M = selection.Wavelet(x.shape).select()
+        M = selection.Wavelet(self.domain_shape).select()
         y  = measurement.Laplace(M, eps).measure(x, prng)
         x_hat = inference.LeastSquares().infer(M, y)
 
@@ -70,7 +71,7 @@ class H2(Base):
     http://dl.acm.org/citation.cfm?id=1920970
     """
 
-    def __init__(self,domain_shape):
+    def __init__(self, domain_shape):
         self.init_params = {}
         self.domain_shape = domain_shape
         super().__init__()

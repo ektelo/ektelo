@@ -34,11 +34,11 @@ class Privelet(Base):
 
     def __init__(self, domain_shape):
         self.init_params = util.init_params_from_locals(locals())
-        self.n = np.prod(domain_shape)
+        self.domain_shape = domain_shape
         super().__init__()
 
     def Run(self, W, x, eps):
-        M = selection.Wavelet((self.n,)).select()
+        M = selection.Wavelet(self.domain_shape).select()
         y  = x.laplace(M, eps)
         x_hat = least_squares(M, y)
 
@@ -54,11 +54,11 @@ class H2(Base):
 
     def __init__(self, domain_shape):
         self.init_params = util.init_params_from_locals(locals())
-        self.n = np.prod(domain_shape)
+        self.domain_shape = domain_shape
         super().__init__()
 
     def Run(self, W, x, eps):
-        M = h2((self.n,))
+        M = h2(self.domain_shape)
         y = x.laplace(M, eps)
         x_hat = least_squares(M, y)
 
@@ -73,7 +73,7 @@ class HB(Base):
 
     def __init__(self, domain_shape, workload_based=False):
         self.init_params = util.init_params_from_locals(locals())
-        self.n = np.prod(domain_shape)
+        self.domain_shape = domain_shape
         self.workload_based = workload_based
         super().__init__()
 
@@ -81,7 +81,7 @@ class HB(Base):
         if self.workload_based:
             x, _ = workload_based(x=x, W=None)
 
-        M = hb((self.n,))
+        M = hb(self.domain_shape)
         y = x.laplace(M, eps)
         x_hat = least_squares(M, y)
 
@@ -238,7 +238,6 @@ class Dawa(Base):
 
     def __init__(self, domain_shape, ratio, approx, workload_based=False):
         self.init_params = util.init_params_from_locals(locals())
-        self.n = np.prod(domain_shape)
         self.domain_shape = domain_shape
         self.ratio = ratio
         self.approx = approx
