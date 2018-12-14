@@ -42,9 +42,10 @@ class HierarchicalRanges(SelectionOperator):
     to generate the lower and upper boudaries through the ranges_gen() function.
     '''
 
-    def __init__(self, domain_shape, include_root, split_func, **kwargs):
+    def __init__(self, domain_shape, include_root, fast_leaves, split_func, **kwargs):
         self.domain_shape = domain_shape
         self.include_root = include_root
+        self.fast_leaves = fast_leaves
         self.split_func = split_func
         self.kwargs = kwargs
 
@@ -170,6 +171,9 @@ class HierarchicalRanges(SelectionOperator):
             cur_range_l = pending_l.pop()
             cur_range_u = pending_u.pop()
             cur_offset = pending_offsets.pop()
+
+
+
             # Resolve offsets in any pending ranges
             lower, higher = HierarchicalRanges.expand_offsets(cur_range_l, cur_range_u, cur_offset)
             selected_ranges_l.extend(lower)
@@ -198,10 +202,16 @@ class HierarchicalRanges(SelectionOperator):
                     pending_offsets.append(new_offset)
                 elif include_leaf:
                     # if include_leaf is set, then add to selected
-                    selected_ranges_l.extend(sub_ranges_l_group)
-                    selected_ranges_u.extend(sub_ranges_u_group)
+                    for l, u in zip(sub_ranges_l_group, sub_ranges_u_group):
+                        lower, higher = HierarchicalRanges.expand_offsets(l, u, cur_offset)
+                        selected_ranges_l.extend(lower)
+                        selected_ranges_u.extend(higher)
+
+
         lower = np.array(selected_ranges_l, dtype=np.int32)
         upper = np.array(selected_ranges_u, dtype=np.int32)
+
+        
         return lower, upper
 
     def select(self):
@@ -209,7 +219,9 @@ class HierarchicalRanges(SelectionOperator):
         start_range_l = [0] * dimension
         start_range_u = [d - 1 for d in self.domain_shape]
 
-        lower, upper = HierarchicalRanges.ranges_gen(
+        # Optimization using Identity as leaves measurements
+        if self.fast_leaves:
+            lower, upper = HierarchicalRanges.ranges_gen(
                                                     start_range_l, 
                                                     start_range_u,
                                                     self.include_root, 
@@ -217,12 +229,25 @@ class HierarchicalRanges(SelectionOperator):
                                                     self.split_func, 
                                                     **self.kwargs)
 
-        # If all selected queries are leaves, return Identity directly
-        if len(lower) == 0:
-            return  matrix.Identity(np.prod(self.domain_shape))
-        # Otherwise union M with Identity
-        M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
-        return matrix.VStack([M, matrix.Identity(np.prod(self.domain_shape))])
+            # If all selected queries are leaves, return Identity directly
+            if len(lower) == 0:
+                return  matrix.Identity(np.prod(self.domain_shape))
+            # Otherwise union M with Identity
+            M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
+            return matrix.VStack([M, matrix.Identity(np.prod(self.domain_shape))])
+
+        else:
+            lower, upper = HierarchicalRanges.ranges_gen(
+                                                    start_range_l, 
+                                                    start_range_u,
+                                                    self.include_root, 
+                                                    True, 
+                                                    self.split_func, 
+                                                    **self.kwargs)
+
+            # directly return results with leaves included
+            M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
+            return M
 
 
 class H2(HierarchicalRanges):
@@ -233,11 +258,12 @@ class H2(HierarchicalRanges):
     when a node has 1 element. This creates a balanced tree with maximum number of nodes at each level
     except (possibly) the last one.
     '''
-    def __init__(self, domain_shape, branching=2):
+    def __init__(self, domain_shape, branching=2, fast_leaves=True):
 
         dimension = len(domain_shape)
         super(H2, self).__init__(domain_shape=domain_shape,
                                  include_root=True,
+                                 fast_leaves=fast_leaves,
                                  split_func=H2.grid_split_range,
                                  branching_list=[branching]*dimension)
 
@@ -248,13 +274,14 @@ class HB(HierarchicalRanges):
     HB select operator(ND)
     Add hierarchical queries with optimal branching factor, per Qardaji et al.
     '''
-    def __init__(self, domain_shape, include_root=False):
+    def __init__(self, domain_shape, include_root=False, fast_leaves=True):
 
         dimension = len(domain_shape)
         branching = HB.find_best_branching(np.prod(domain_shape))
 
         super(HB, self).__init__(domain_shape=domain_shape,
                                  include_root=include_root,
+                                 fast_leaves=fast_leaves,
                                  split_func=HB.grid_split_range,
                                  branching_list=[branching]*dimension)
 
@@ -288,13 +315,14 @@ class QuadTree(HierarchicalRanges):
     QuadTree Selection operator
 
     '''
-    def __init__(self, domain_shape):
+    def __init__(self, domain_shape, fast_leaves=True):
         assert len(domain_shape) == 2, \
             "QuadTree selection is defined on 2D"
         domain_shape = domain_shape
 
         super(QuadTree, self).__init__(domain_shape=domain_shape,
                                        include_root=True,
+                                       fast_leaves=fast_leaves,
                                        split_func=QuadTree.quad_split_range)
 
     @staticmethod
