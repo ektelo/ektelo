@@ -17,7 +17,12 @@ from functools import reduce
 
 
 def GenerateCells(n,m,num1,num2,grid):
-    # this function used to generate all the cells in UGrid
+    '''
+    Generate grid shaped celles for UniformGrid and AdaptiveGrid.and
+    n, m: 2D domain shape
+    num1, num2: number of cells along two dimensions
+    grid: grid size
+    '''
     assert math.ceil(util.old_div(n,float(grid))) == num1 and math.ceil(util.old_div(m,float(grid))) == num2, "Unable to generate cells for Ugrid: check grid number and grid size"
     lower, upper = [], []
     for i in range(num1):
@@ -167,13 +172,11 @@ class HierarchicalRanges(SelectionOperator):
         pending_offsets = [[[np.array([0], dtype='int')]] * dimension] if include_root \
                         else [[[np.array([], dtype='int')]] * dimension]
         selected_ranges_l, selected_ranges_u = [], [] 
+        
         while len(pending_l) != 0:
             cur_range_l = pending_l.pop()
             cur_range_u = pending_u.pop()
             cur_offset = pending_offsets.pop()
-
-
-
             # Resolve offsets in any pending ranges
             lower, higher = HierarchicalRanges.expand_offsets(cur_range_l, cur_range_u, cur_offset)
             selected_ranges_l.extend(lower)
@@ -207,11 +210,8 @@ class HierarchicalRanges(SelectionOperator):
                         selected_ranges_l.extend(lower)
                         selected_ranges_u.extend(higher)
 
-
         lower = np.array(selected_ranges_l, dtype=np.int32)
         upper = np.array(selected_ranges_u, dtype=np.int32)
-
-        
         return lower, upper
 
     def select(self):

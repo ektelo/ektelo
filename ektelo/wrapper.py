@@ -56,7 +56,7 @@ def laplace_scale_factor(M, eps):
     return cmeasurement.laplace_scale_factor(M, eps)
 
 
-def non_negative_least_squares(Ms, ys, l1_reg = 0, l2_reg =0, scale_factors=None):
+def non_negative_least_squares(Ms, ys, l1_reg=0, l2_reg=0, scale_factors=None):
     return inference.NonNegativeLeastSquares(l1_reg, l2_reg).infer(Ms, ys, scale_factors)
 
 

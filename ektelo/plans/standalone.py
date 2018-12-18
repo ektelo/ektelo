@@ -695,6 +695,7 @@ class MwemVariantD(Base):
         # Start with a unifrom estimation of x
         x_hat = np.array([self.data_scale / float(domain_size)] * domain_size)
         
+        # non-zero regs to avoid super long convergence time.
         nnls = inference.NonNegativeLeastSquares(l1_reg=1e-6, l2_reg=1e-6)
 
         measuredQueries = []
