@@ -327,6 +327,9 @@ class Kronecker(EkteloMatrix):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
 
 class Haar(EkteloMatrix):
+    """
+    The Haar wavelet is a square matrix of size n x n where n is a power of 2
+    """
     def __init__(self, n, dtype = np.float64):
         self.n = n
         self.k = int(math.log(n, 2))
