@@ -87,7 +87,7 @@ class EkteloMatrix(LinearOperator):
         m = self.shape[0]
         v = np.zeros(m)
         v[key] = 1.0
-        return EkteloMatrix(self.T.dot(v).reshape(1, m))
+        return EkteloMatrix(self.T.dot(v).reshape(1, -1))
     
     def dense_matrix(self):
         """
