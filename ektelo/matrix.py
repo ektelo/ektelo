@@ -164,6 +164,9 @@ class Ones(EkteloMatrix):
 class Weighted(EkteloMatrix):
     """ Class for multiplication by a constant """
     def __init__(self, base, weight):
+        if isinstance(base, Weighted):
+            weight *= base.weight
+            base = base.base
         self.base = base
         self.weight = weight
         self.shape = base.shape
@@ -177,9 +180,21 @@ class Weighted(EkteloMatrix):
     
     def gram(self):
         return Weighted(self.base.gram(), self.weight**2)
+        
+    def pinv(self):
+        return Weighted(self.base.pinv(), 1.0/self.weight)
+
+    def inv(self):
+        return Weighted(self.base.inv(), 1.0/self.weight)
+
+    def trace(self):
+        return self.weight * self.base.trace()
     
     def __abs__(self):
         return Weighted(self.base.__abs__(), np.abs(self.weight))
+        
+    def __sqr__(self):
+        return Weighted(self.base.__sqr__(), self.weight**2)
     
     @property
     def matrix(self):
