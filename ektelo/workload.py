@@ -1,4 +1,5 @@
 from ektelo import matrix
+from ektelo.hdmm import utility
 from ektelo.matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker, Sum, Weighted
 import collections
 import functools
@@ -369,6 +370,57 @@ class MarginalsGram(Sum):
             weights += sub.weight * functools.reduce(np.kron, tmp)
         return MarginalsGram(dom, weights)
  
+class AllNormK(EkteloMatrix):
+    def __init__(self, n, norms, dtype=np.float64):
+        """
+        All predicate queries that sum k elements of the domain
+        :param n: The domain size
+        :param norms: the L1 norm (number of 1s) of the queries (int or list of ints)
+        """
+        self.n = n
+        if type(norms) is int:
+            norms = [norms]
+        self.norms = norms
+        self.m = int(sum(utility.nCr(n, k) for k in norms))
+        self.shape = (self.m, self.n)
+        self.dtype = dtype
+
+    @property
+    def matrix(self):
+        Q = np.zeros((self.m, self.n))
+        idx = 0
+        for k in self.norms:
+            for q in itertools.combinations(range(self.n), k):
+                Q[idx, q] = 1.0
+                idx += 1
+        return Q
+
+    def gram(self):
+        # WtW[i,i] = nCr(n-1, k-1) (1 for each query having q[i] = 1)
+        # WtW[i,j] = nCr(n-2, k-2) (1 for each query having q[i] = q[j] = 1)
+        n = self.n
+        diag = sum(utility.nCr(n-1, k-1) for k in self.norms)
+        off = sum(utility.nCr(n-2, k-2) for k in self.norms)
+        return off*Ones(n,n) + (diag-off)*Identity(n)
+
+class Disjuncts(Sum):
+    """
+    Just like the Kron workload class can represent a cartesian product of predicate counting
+    queries where the predicates are conjunctions, this workload class can represent a cartesian
+    product of predicate counting queries where the predicates are disjunctions.
+    """
+    #TODO: check implementation after refactoring
+    def __init__(self, workloads):
+        # q or r = - (-q and -r)
+        # W = 1 x 1 - (Q1 x R1)
+
+        self.A = Kronecker([Ones(*W.shape) for W in workloads]) # totals
+        self.B = -1*Kronecker([Ones(*W.shape) - W for W in workloads]) # negations
+        Sum.__init__(self, [self.A, self.B])
+
+    def gram(self):
+        return Sum([self.A.gram(), self.A.T @ self.B, self.B.T @ self.A, self.B.gram()])
+
 def RandomRange(shape_list, domain, size, seed=9001):
     if type(domain) is int:
         domain = (domain,)
@@ -394,7 +446,7 @@ def DimKMarginals(domain, dims):
     for key in itertools.product(*[[1,0]]*len(domain)):
         if sum(key) in dims:
             weights[key] = 1.0
-    return Marginals(domain, weights)
+    return Marginals.frombinary(domain, weights)
 
 def Range2D(n):
     return Kronecker([AllRange(n), AllRange(n)])

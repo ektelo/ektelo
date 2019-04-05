@@ -205,19 +205,14 @@ class Marginals(TemplateStrategy):
 
     def strategy(self):
         dom = self._domain
-        keys = itertools.product(*[[0,1]]*len(dom))
-        weights = dict(zip(keys, np.sqrt(self._params)))
+        weights = np.sqrt(self._params)
         return workload.Marginals(dom, weights) 
 
     def _set_workload(self, W):
         marg = marginals_approx(W)
+        weights = marg.weights
         d = len(self._domain)
         A = np.arange(2**d)
-
-        weights = np.zeros(2**d)
-        for i in range(2**d):
-            key = tuple([int(bool(2**k & i)) for k in range(d)])
-            weights[i] = marg.weights[key]
 
         self._dphi = np.array([np.dot(weights**2, self._mult[A|b]) for b in range(2**d)]) 
 
@@ -343,6 +338,5 @@ def marginals_approx(W):
             a = float(X.trace()) / n - b
             tmp.append(np.array([b,a]))
         weights += reduce(np.kron, tmp)
-    keys = itertools.product(*[[0,1]]*len(dom))
-    weights = dict(zip(keys, np.sqrt(weights)))
+    weights = np.sqrt(weights)
     return workload.Marginals(dom, weights) 
