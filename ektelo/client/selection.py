@@ -12,7 +12,8 @@ import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
-from ektelo import matrix, workload, hdmm_templates
+from ektelo import matrix, workload
+from ektelo.hdmm import templates
 from functools import reduce
 
 
@@ -374,7 +375,7 @@ class HDMM1D(SelectionOperator):
             self.p = self.n // 16
     
     def select(self):
-        pid = hdmm_templates.PIdentity(self.p, self.n)
+        pid = templates.PIdentity(self.p, self.n)
         pid.optimize(self.W)
         return pid.strategy()
 
@@ -391,7 +392,7 @@ class HDMM(SelectionOperator):
         """
         self.W = W 
         self.domain_shape = domain_shape
-        self.template = hdmm_templates.KronPIdentity(ps, domain_shape)
+        self.template = templates.KronPIdentity(ps, domain_shape)
 
     def select(self):
         self.template.optimize(self.W)
