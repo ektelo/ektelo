@@ -1,16 +1,19 @@
 from ektelo import matrix, workload
+from ektelo.hdmm import error
+from functools import reduce
+import numpy as np
 from scipy import optimize
 from scipy import sparse
 from scipy.sparse.linalg import spsolve_triangular
-import numpy as np
-from functools import reduce
-import itertools
 
 class TemplateStrategy:
 
     def strategy(self):
         pass
-   
+  
+    def _AtA1(self):
+        return self.strategy().gram().pinv().dense_matrix()
+ 
     def _loss_and_grad(self, params):
         pass
 
@@ -24,13 +27,24 @@ class TemplateStrategy:
         :param W: the workload, may be a n x n numpy array for WtW or a workload object
         """
         self._set_workload(W)
-        init = self._params
+        init = np.random.rand(self._params.size)
         bnds = [(0,None)]*init.size
        
         opts = { 'ftol' : 1e-4 }
         res = optimize.minimize(self._loss_and_grad, init, jac=True, method='L-BFGS-B', bounds=bnds, options=opts)
         self._params = res.x
-         
+        
+    def restart_optimize(self, W, restarts):
+        best_A, best_loss = None, np.inf
+        for _ in range(restarts):
+            self.optimize(W)
+            A = self.strategy()
+            loss = error.rootmse(W, A)
+            if loss <= best_loss:
+                best_loss = loss
+                best_A = A
+        return best_A, best_loss
+
 class Default(TemplateStrategy):
     def __init__(self, m, n):
         self._params = np.random.rand(m*n)
@@ -81,6 +95,12 @@ class PIdentity(TemplateStrategy):
         I = sparse.eye(self.n, format='csr')
         A = sparse.vstack([I, B], format='csr')
         return matrix.EkteloMatrix(A / A.sum(axis=0))
+
+    def _AtA1(self):
+        B = np.reshape(self._params, (self.p,self.n))
+        scale = 1.0 + np.sum(B, axis=0)
+        R = np.linalg.inv(np.eye(self.p) + B @ B.T) # O(k^3)
+        return (np.eye(self.n) - B.T @ R @ B)*scale*scale[:,None]
  
     def _set_workload(self, W):
         self._WtW = W.gram().dense_matrix()
@@ -91,7 +111,8 @@ class PIdentity(TemplateStrategy):
 
         B = np.reshape(params, (p,n))
         scale = 1.0 + np.sum(B, axis=0)
-        R = np.linalg.inv(np.eye(p) + B.dot(B.T)) # O(k^3)
+        try: R = np.linalg.inv(np.eye(p) + B.dot(B.T)) # O(k^3)
+        except: return np.inf, np.zeros_like(params)
         C = WtW * scale * scale[:,None] # O(n^2)
         M1 = R.dot(B) # O(n k^2)
         M2 = M1.dot(C) # O(n^2 k)
@@ -138,13 +159,18 @@ class AugmentedIdentity(TemplateStrategy):
         self._pid._params = B.flatten()
         return self._pid.strategy()
 
+    def _AtA1(self):
+        params = np.append(0, self._params)
+        B = params[self._imatrix]
+        self._pid._params = B.flatten()
+        return self._pid._AtA1()
+
     def _loss_and_grad(self, params):
         params = np.append(0, params)
         B = params[self._imatrix]
         obj, grad = self._pid._loss_and_grad(B.flatten())
         grad2 = np.bincount(self._imatrix.flatten(), grad)[1:]
         return obj, grad2
-         
 
 class Static(TemplateStrategy):
     def __init__(self, strategy):
@@ -168,95 +194,97 @@ class Kronecker(TemplateStrategy):
             for subA, subW in zip(self._templates, W.matrices):
                 subA.optimize(subW)
             return
-        assert isinstance(W, matrix.VStack) and isinstance(W.matrices[0], matrix.Kronecker)
+
+        WtW = workload.sum_kron_canonical(W.gram())
+
+        workloads = [[Q.dense_matrix() for Q in K.base.matrices] for K in WtW.matrices]
+        weights = [K.weight for K in WtW.matrices]
         
-        workloads = [K.matrices for K in W.matrices] # a k x d table of workloads
         k = len(workloads)
         d = len(workloads[0])
         C = np.ones((d,k))
 
         for i in range(d):
             temp = self._templates[i]
+            # this won't exploit efficient psuedo inverse of pidentity
+            AtA1 = temp._AtA1()
             for j in range(k):
-                temp._set_workload(workloads[j][i])
-                C[j][i] = temp._loss_and_grad(temp._params)[0]
+                #W = workload.ExplicitGram(workloads[j][i])
+                #temp._set_workload(W)
+                #C[i,j] = temp._loss_and_grad(temp._params)[0]
+                C[i,j] = np.sum(workloads[j][i] * AtA1)
         for _ in range(10):
             #err = C.prod(axis=0).sum()
             for i in range(d):
                 temp = self._templates[i]
-                cs = np.sqrt(C.prod(axis=0) / C[i])
-                What = matrix.VStack([c*Ws[i] for c, Ws in zip(cs, workloads)])
+                cs = C.prod(axis=0) / C[i]
+                What = sum(c*WtWs[i] for c, WtWs in zip(cs, workloads))
+                What = workload.ExplicitGram(What)
                 temp.optimize(What)
+                AtA1 = temp._AtA1()
                 for j in range(k):
-                    temp._set_workload(workloads[j][i])
-                    C[j][i] = temp._loss_and_grad(temp._params)[0]
+                    #temp._set_workload(workloads[j][i])
+                    #C[i,j] = temp._loss_and_grad(temp._params)[0]
+                    C[i,j] = np.sum(workloads[j][i] * AtA1)
+
+class Union(TemplateStrategy):
+    def __init__(self, templates):
+        # expects workload to be a list of same length as templates
+        # workload may contain subworkloads defined over different marginals of the data vector:w
+        self._templates = templates
+        self._weights = np.ones(len(templates)) / len(templates)
+    
+    def strategy(self):
+        return matrix.VStack([w * T.strategy() for w, T in zip(self._weights, self._templates)])
+        
+    def optimize(self, W):
+        assert isinstance(W, list), 'workload must be a list'
+        assert len(W) == len(self._templates), 'length of workload list must match templates'
+       
+        errors = [] 
+        for Ti, Wi in zip(self._templates, W):
+            Ti.optimize(Wi)
+            errors.append(error.expected_error(Wi, Ti.strategy()))
+
+        weights = (2 * np.array(errors))**(1.0/3.0)
+        weights /= weights.sum()
+        self._weights = weights 
+            
 
 class Marginals(TemplateStrategy):
     def __init__(self, domain):
         self._domain = domain
         d = len(domain)
         self._params = np.random.rand(2**len(domain))
-        mult = np.ones(2**d)
-        for i in range(2**d):
-            for k in range(d):
-                if not (i & (2**k)):
-                    mult[i] *= domain[k]
-        self._mult = mult
+ 
+        self.gram = workload.MarginalsGram(domain, self._params**2)
 
     def strategy(self):
-        dom = self._domain
-        weights = np.sqrt(self._params)
-        return workload.Marginals(dom, weights) 
+        return workload.Marginals(self._domain, self._params)
 
     def _set_workload(self, W):
-        marg = marginals_approx(W)
+        marg = workload.Marginals.approximate(W) 
+        d = len(self._domain)
+        A = np.arange(2**d)
         weights = marg.weights
-        d = len(self._domain)
-        A = np.arange(2**d)
 
-        self._dphi = np.array([np.dot(weights**2, self._mult[A|b]) for b in range(2**d)]) 
-
-    def _Xmatrix(self,vect):
-        # the matrix X such that M(u) M(v) = M(X(u) v)
-        d = len(self._domain)
-        A = np.arange(2**d)
-        mult = self._mult
-
-        values = np.zeros(3**d)
-        rows = np.zeros(3**d, dtype=int)
-        cols = np.zeros(3**d, dtype=int)
-        start = 0
-        for b in range(2**d):
-            #uniq, rev = np.unique(a&B, return_inverse=True) # most of time being spent here
-            mask = np.zeros(2**d, dtype=int)
-            mask[A&b] = 1
-            uniq = np.nonzero(mask)[0]
-            step = uniq.size
-            mask[uniq] = np.arange(step)
-            rev = mask[A&b]
-            values[start:start+step] = np.bincount(rev, vect*mult[A|b], step)
-            if values[start+step-1] == 0:
-                values[start+step-1] = 1.0 # hack to make solve triangular work
-            cols[start:start+step] = b
-            rows[start:start+step] = uniq
-            start += step
-        X = sparse.csr_matrix((values, (rows, cols)), (2**d, 2**d))
-        XT = sparse.csr_matrix((values, (cols, rows)), (2**d, 2**d))
-        return X, XT
+        self._dphi = np.array([np.dot(weights**2, self.gram._mult[A|b]) for b in range(2**d)]) 
 
     def _loss_and_grad(self, params):
         d = len(self._domain)
         A = np.arange(2**d)
-        mult = self._mult
+        mult = self.gram._mult
+        Xmatrix = self.gram._Xmatrix
         dphi = self._dphi
         theta = params
 
+        # TODO: accomodate (eps, delta)-DP
         delta = np.sum(theta)**2
         ddelta = 2*np.sum(theta)
         theta2 = theta**2
-        Y, YT = self._Xmatrix(theta2)
+        Y, YT = Xmatrix(theta2)
         params = Y.dot(theta2)
-        X, XT = self._Xmatrix(params)
+        X, XT = Xmatrix(params)
         phi = spsolve_triangular(X, theta2, lower=False)
         # Note: we should be multiplying by domain size here if we want total squared error
         ans = np.dot(phi, dphi)
@@ -267,6 +295,89 @@ class Marginals(TemplateStrategy):
         dtheta = 2*theta*dtheta2
         return delta*ans, delta*dtheta + ddelta*ans
 
+class YuanConvex(TemplateStrategy):
+    def optimize(self, W):
+        V = W.gram().dense_matrix()
+
+        accuracy = 1e-10
+        max_iter_ls = 50
+        max_iter_cg = 5
+        theta = 1e-3
+        
+        beta = 0.5
+        sigma = 1e-4
+        n = V.shape[0]
+        I = np.eye(n)
+        X = I
+        max_iter = 100
+        V = V + theta*np.mean(np.diag(V))*I
+        
+        iX = I
+        G = -V
+        fcurr = np.sum((V*iX)**2)
+        history = []
+
+        for iter in range(1, max_iter+1):
+            if iter == 1:
+                D = -G
+                np.fill_diagonal(D,0)
+                j = 0
+            else:
+                D = np.zeros((n,n))
+                Hx = lambda S: -iX.dot(S).dot(G) - G.dot(S).dot(iX)
+                np.fill_diagonal(D, 0)
+                R = -G - Hx(D)
+                np.fill_diagonal(R, 0)
+                P = R;
+                rsold = np.sum(R**2)
+                for j in range(1, max_iter_cg+1):
+                    Hp = Hx(P)
+                    alpha = rsold / np.sum(P * Hp)
+                    D += alpha*P
+                    np.fill_diagonal(D, 0)
+                    R -= alpha*Hp
+                    np.fill_diagonal(R, 0)
+                    rsnew = np.sum(R**2)
+                    if np.sqrt(rsnew) < 1e-8:
+                        break
+                    P = R + rsnew / rsold * P
+                    rsold = rsnew
+
+            delta = np.sum(D * G)
+            X_old = X
+            flast = fcurr
+            history.append(fcurr)
+            
+            for i in range(1, max_iter_ls+1):
+                alpha = beta**(i-1)
+                X = X_old + alpha*D
+                iX = np.linalg.inv(X)
+                try:
+                    A = np.linalg.cholesky(X)
+                except:
+                    continue
+                G = -iX.dot(V).dot(iX)
+                fcurr = np.sum(V * iX)
+                if fcurr <= flast + alpha*sigma*delta:
+                    break
+
+            #print(fcurr)
+
+            if i==max_iter_ls:
+                X = X_old
+                fcurr = flast
+                break
+            if np.abs((flast - fcurr) / flast) < accuracy:
+                break
+
+        self.ans = np.linalg.cholesky(X)
+
+    def strategy(self):
+        return matrix.EkteloMatrix(self.ans)
+ 
+def KronYuan(ns):
+    return Kronecker([YuanConvex() for _ in ns])
+
 def KronPIdentity(ps, ns):
     """
     Builds a template strategy of the form A1 x ... x Ad where each Ai is a PIdentity template
@@ -274,6 +385,16 @@ def KronPIdentity(ps, ns):
     :param ns: the domain size of each dimension
     """
     return Kronecker([PIdentity(p, n) for p,n in zip(ps, ns)])
+
+def UnionKron(ps, ns):
+    """
+    Builds a template strategy that is a union of Kronecker products, where each
+    kron product is a PIdentity strategy
+
+    :param ps: a table of p values of size k x d where k is number of strategies in union and d in number of dimensions
+    :param ns: the domain size of each dimension (length d tuple)
+    """
+    return Union([KronPIdentity(p, ns) for p in ps])
 
 def RangeTemplate(n, start=32, branch=4, shared=False):
     """
@@ -316,27 +437,3 @@ def Identity(n):
 def Total(n):
     """ Builds a template strategy that is always Total """
     return Static(np.ones((1,n)))
-
-def marginals_approx(W):
-    """
-    Given a Union-of-Kron workload, find a Marginals workload that approximates it.
-    
-    The guarantee is that for all marginals strategies A, Error(W, A) = Error(M, A) where
-    M is the returned marginals approximation of W.
-    The other guarantee is that this function is idempotent: approx(approx(W)) = approx(W)
-    """
-    if isinstance(W, matrix.Kronecker):
-        W = matrix.VStack([W])
-    assert isinstance(W, matrix.VStack) and isinstance(W.matrices[0], matrix.Kronecker)
-    dom = tuple(Wi.shape[1] for Wi in W.matrices[0].matrices)
-    weights = np.zeros(2**len(dom))
-    for sub in W.matrices:
-        tmp = []
-        for n, piece in zip(dom, sub.matrices):
-            X = piece.gram().dense_matrix()
-            b = float(X.sum() - X.trace()) / (n * (n-1))
-            a = float(X.trace()) / n - b
-            tmp.append(np.array([b,a]))
-        weights += reduce(np.kron, tmp)
-    weights = np.sqrt(weights)
-    return workload.Marginals(dom, weights) 

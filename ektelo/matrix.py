@@ -261,7 +261,15 @@ class Sum(EkteloMatrix):
 
     def _transpose(self):
         return Sum([Q.T for Q in self.matrices])
-    
+
+    def __mul__(self, other):
+        if isinstance(other,EkteloMatrix):
+            return Sum([Q @ other for Q in self.matrices]) # should use others rmul though
+        return EkteloMatrix.__mul__(self, other)
+
+    def diag(self):
+        return sum(Q.diag() for Q in self.matrices)
+
     @property
     def matrix(self):
         if _any_sparse(self.matrices):
@@ -379,15 +387,32 @@ class Kronecker(EkteloMatrix):
   
     def sensitivity(self):
         return np.prod([Q.sensitivity() for Q in self.matrices])
+
+    def inv(self):
+        return Kronecker([Q.inv() for Q in self.matrices])
+
+    def pinv(self):
+        return Kronecker([Q.pinv() for Q in self.matrices])
+
+    def diag(self):
+        return reduce(np.kron, [Q.diag() for Q in self.matrices])
+
+    def trace(self):
+        return np.prod([Q.trace() for Q in self.matrices])
     
     def __mul__(self, other):
         # perform the multiplication in the implicit representation if possible
         if isinstance(other, Kronecker):
             return Kronecker([A @ B for A,B in zip(self.matrices, other.matrices)])
+        elif isinstance(other, HStack):
+            return other.__rmul__(self)
         return EkteloMatrix.__mul__(self, other)
  
     def __abs__(self):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
+
+    def __sqr__(self):
+        return Kronecker([Q.__sqr__() for Q in self.matrices]) 
 
 class Haar(EkteloMatrix):
     """

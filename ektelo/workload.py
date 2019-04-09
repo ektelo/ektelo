@@ -421,6 +421,15 @@ class Disjuncts(Sum):
     def gram(self):
         return Sum([self.A.gram(), self.A.T @ self.B, self.B.T @ self.A, self.B.gram()])
 
+class ExplicitGram:
+    # not an Ektelo Matrix, but behaves like it in the sense that it has gram function,
+    # meaning strategy optimization is possible
+    def __init__(self, matrix):
+        self.matrix = matrix
+    
+    def gram(self):
+        return EkteloMatrix(self.matrix)
+
 def RandomRange(shape_list, domain, size, seed=9001):
     if type(domain) is int:
         domain = (domain,)
