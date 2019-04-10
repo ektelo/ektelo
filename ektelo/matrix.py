@@ -20,7 +20,7 @@ class EkteloMatrix(LinearOperator):
         self.matrix = matrix
         self.dtype = matrix.dtype
         self.shape = matrix.shape
-    
+
     def asDict(self):
         d = util.class_to_dict(self, ignore_list=[])
         return d
@@ -46,7 +46,7 @@ class EkteloMatrix(LinearOperator):
    
     def sensitivity(self):
         # note: this works because np.abs calls self.__abs__
-        return np.max(np.abs(self).sum(axis=1))
+        return np.max(np.abs(self).sum(axis=0))
  
     def sum(self, axis=None):
         # this implementation works for all subclasses too 
@@ -55,6 +55,18 @@ class EkteloMatrix(LinearOperator):
             return self.T.dot(np.ones(self.shape[0]))
         ans = self.dot(np.ones(self.shape[1]))  
         return ans if axis == 1 else np.sum(ans)
+
+    def inv(self):
+        return EkteloMatrix(np.linalg.inv(self.dense_matrix()))
+
+    def pinv(self):
+        return EkteloMatrix(np.linalg.pinv(self.dense_matrix()))
+
+    def trace(self):
+        return self.diag().sum()
+
+    def diag(self):
+        return np.diag(self.dense_matrix())
 
     def _adjoint(self):
         return self._transpose()
@@ -65,11 +77,19 @@ class EkteloMatrix(LinearOperator):
         if type(other) == np.ndarray:
             return self.dot(other)
         if isinstance(other, EkteloMatrix):
+            return Product(self, other)
             # note: this expects both matrix types to be compatible (e.g., sparse and sparse)
             # todo: make it work for different backing representations
-            return EkteloMatrix(self.matrix @ other.matrix)
         else:
             raise TypeError('incompatible type %s for multiplication with EkteloMatrix'%type(other))
+
+    def __add__(self, other):
+        if np.isscalar(other):
+            other = Weighted(Ones(self.shape), other)
+        return Sum([self, other])
+
+    def __sub__(self, other):
+        return self + -1*other
             
     def __rmul__(self, other):
         if np.isscalar(other):
@@ -87,7 +107,7 @@ class EkteloMatrix(LinearOperator):
         m = self.shape[0]
         v = np.zeros(m)
         v[key] = 1.0
-        return EkteloMatrix(self.T.dot(v).reshape(1, -1))
+        return EkteloMatrix(self.T.dot(v).reshape(1, self.shape[1]))
     
     def dense_matrix(self):
         """
@@ -113,6 +133,11 @@ class EkteloMatrix(LinearOperator):
     def __abs__(self):
         return EkteloMatrix(self.matrix.__abs__())
     
+    def __sqr__(self):
+        if sparse.issparse(self.matrix):
+            return EkteloMatrix(self.matrix.power(2))
+        return EkteloMatrix(self.matrix**2)
+   
 class Identity(EkteloMatrix):
     def __init__(self, n, dtype=np.float64):
         self.n = n
@@ -133,7 +158,19 @@ class Identity(EkteloMatrix):
         assert other.shape[0] == self.n, 'dimension mismatch'
         return other
 
+    def inv(self):
+        return self
+
+    def pinv(self):
+        return self
+
+    def trace(self):
+        return self.n
+
     def __abs__(self):  
+        return self
+
+    def __sqr__(self):
         return self
 
 class Ones(EkteloMatrix):
@@ -153,6 +190,14 @@ class Ones(EkteloMatrix):
     
     def gram(self):
         return self.m * Ones(self.n, self.n, self.dtype)
+
+    def pinv(self): 
+        c = 1.0 / (self.m * self.n)
+        return c * Ones(self.n, self.m, self.dtype)
+
+    def trace(self):
+        assert self.n == self.m, 'matrix is not square'
+        return self.n
         
     @property
     def matrix(self):
@@ -160,10 +205,16 @@ class Ones(EkteloMatrix):
     
     def __abs__(self):
         return self
+
+    def __sqr__(self):
+        return self
     
 class Weighted(EkteloMatrix):
     """ Class for multiplication by a constant """
     def __init__(self, base, weight):
+        if isinstance(base, Weighted):
+            weight *= base.weight
+            base = base.base
         self.base = base
         self.weight = weight
         self.shape = base.shape
@@ -177,9 +228,21 @@ class Weighted(EkteloMatrix):
     
     def gram(self):
         return Weighted(self.base.gram(), self.weight**2)
+        
+    def pinv(self):
+        return Weighted(self.base.pinv(), 1.0/self.weight)
+
+    def inv(self):
+        return Weighted(self.base.inv(), 1.0/self.weight)
+
+    def trace(self):
+        return self.weight * self.base.trace()
     
     def __abs__(self):
         return Weighted(self.base.__abs__(), np.abs(self.weight))
+        
+    def __sqr__(self):
+        return Weighted(self.base.__sqr__(), self.weight**2)
     
     @property
     def matrix(self):
@@ -198,7 +261,15 @@ class Sum(EkteloMatrix):
 
     def _transpose(self):
         return Sum([Q.T for Q in self.matrices])
-    
+
+    def __mul__(self, other):
+        if isinstance(other,EkteloMatrix):
+            return Sum([Q @ other for Q in self.matrices]) # should use others rmul though
+        return EkteloMatrix.__mul__(self, other)
+
+    def diag(self):
+        return sum(Q.diag() for Q in self.matrices)
+
     @property
     def matrix(self):
         if _any_sparse(self.matrices):
@@ -316,15 +387,32 @@ class Kronecker(EkteloMatrix):
   
     def sensitivity(self):
         return np.prod([Q.sensitivity() for Q in self.matrices])
+
+    def inv(self):
+        return Kronecker([Q.inv() for Q in self.matrices])
+
+    def pinv(self):
+        return Kronecker([Q.pinv() for Q in self.matrices])
+
+    def diag(self):
+        return reduce(np.kron, [Q.diag() for Q in self.matrices])
+
+    def trace(self):
+        return np.prod([Q.trace() for Q in self.matrices])
     
     def __mul__(self, other):
         # perform the multiplication in the implicit representation if possible
         if isinstance(other, Kronecker):
             return Kronecker([A @ B for A,B in zip(self.matrices, other.matrices)])
+        elif isinstance(other, HStack):
+            return other.__rmul__(self)
         return EkteloMatrix.__mul__(self, other)
  
     def __abs__(self):
         return Kronecker([Q.__abs__() for Q in self.matrices]) 
+
+    def __sqr__(self):
+        return Kronecker([Q.__sqr__() for Q in self.matrices]) 
 
 class Haar(EkteloMatrix):
     """
@@ -392,6 +480,33 @@ class _LazyProduct(EkteloMatrix):
 
     def gram(self):
         return _LazyProduct(self.T, self)
+
+def _any_sparse(matrices):
+    return any(sparse.issparse(Q.matrix) for Q in matrices)
+
+class Product(EkteloMatrix):
+    def __init__(self, A, B):
+        assert A.shape[1] == B.shape[0]
+        self._A = A
+        self._B = B
+        self.shape = (A.shape[0], B.shape[1])
+        self.dtype = np.result_type(A.dtype, B.dtype)
+
+    def _matmat(self, X):
+        return self._A.dot(self._B.dot(X))
+
+    def _transpose(self):
+        return Product(self._B.T, self._A.T)
+
+    @property
+    def matrix(self):
+        return self._A.matrix @ self._B.matrix
+
+    def gram(self):
+        return Product(self.T, self)
+
+    def inv(self):
+        return Product(self._B.inv(), self._A.inv())
 
 def _any_sparse(matrices):
     return any(sparse.issparse(Q.matrix) for Q in matrices)
