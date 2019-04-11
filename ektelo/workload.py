@@ -448,6 +448,24 @@ def RandomRange(shape_list, domain, size, seed=9001):
 
     return RangeQueries.fromlist(domain, queries) 
 
+def Moments(n, k=3):
+    N = np.arange(n)
+    K = np.arange(1,k+1)
+    W = N[None]**K[:,None]
+    return EkteloMatrix(W)
+
+def WidthKRange(n, widths):
+    if type(widths) is int:
+        widths = [widths]
+    m = sum(n-k+1 for k in widths)
+    W = np.zeros((m, n))
+    row = 0
+    for k in widths:
+        for i in range(n-k+1):
+            W[row+i, i:i+k] = 1.0
+        row += n - k + 1
+    return EkteloMatrix(W)
+
 def DimKMarginals(domain, dims):
     if type(dims) is int:
         dims = [dims]
