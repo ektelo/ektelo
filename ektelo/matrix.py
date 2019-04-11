@@ -460,30 +460,6 @@ class Haar(EkteloMatrix):
             H = sparse.vstack([A,B], format='csr')
         return H
 
-class _LazyProduct(EkteloMatrix):
-    def __init__(self, A, B):
-        assert A.shape[1] == B.shape[0]
-        self._A = A
-        self._B = B
-        self.shape = (A.shape[0], B.shape[1])
-        self.dtype = np.result_type(A.dtype, B.dtype)
-
-    def _matmat(self, X):
-        return self._A.dot(self._B.dot(X))
-
-    def _transpose(self):
-        return _LazyProduct(self._B.T, self._A.T)
-
-    @property
-    def matrix(self):
-        return self._A.matrix @ self._B.matrix
-
-    def gram(self):
-        return _LazyProduct(self.T, self)
-
-def _any_sparse(matrices):
-    return any(sparse.issparse(Q.matrix) for Q in matrices)
-
 class Product(EkteloMatrix):
     def __init__(self, A, B):
         assert A.shape[1] == B.shape[0]

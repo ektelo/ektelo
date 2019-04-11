@@ -282,18 +282,22 @@ class Marginals(TemplateStrategy):
         delta = np.sum(theta)**2
         ddelta = 2*np.sum(theta)
         theta2 = theta**2
+
         Y, YT = Xmatrix(theta2)
         params = Y.dot(theta2)
         X, XT = Xmatrix(params)
-        phi = spsolve_triangular(X, theta2, lower=False)
+        # hack to make solve_triangular work
+        D = sparse.diags(X.dot(np.ones(2**d))==0, dtype=float)
+        phi = spsolve_triangular(X+D, theta2, lower=False)
         # Note: we should be multiplying by domain size here if we want total squared error
         ans = np.dot(phi, dphi)
-        dXvect = -spsolve_triangular(XT, dphi, lower=True)
+        dXvect = -spsolve_triangular(XT+D, dphi, lower=True)
         # dX = outer(dXvect, phi)
         dparams = np.array([np.dot(dXvect[A&b]*phi, mult[A|b]) for b in range(2**d)])
         dtheta2 = YT.dot(dparams)
         dtheta = 2*theta*dtheta2
         return delta*ans, delta*dtheta + ddelta*ans
+
 
 class YuanConvex(TemplateStrategy):
     def optimize(self, W):
