@@ -1,59 +1,12 @@
 from __future__ import division
 from builtins import zip
 from ektelo import util
+from ektelo.matrix import EkteloMatrix
 from functools import reduce
 import math
 import numpy as np
 from scipy import sparse
 from ektelo import workload
-
-def split_rectangle (x, b_h, b_v):
-    """
-    Check if the quadtree produces a measurement set of correct size
-    For use with Hb2D
-    """
-    n_rows = x.shape[0]
-    n_cols = x.shape[1]
-
-    # if equally divisible then b_{v,h} is the number of split points for each dimension
-    h_split = b_h
-    v_split = b_v
-
-    # otherwise create the list of splitpoints
-    if n_rows % b_h != 0:
-        new_hsize = np.divide(n_rows, b_h, dtype = float)
-        h_split = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(b_h - 1)]
-
-    if n_cols % b_v != 0:
-        new_vsize = np.divide(n_cols, b_v, dtype = float)
-        v_split = [np.ceil(new_vsize * (i + 1)).astype(int) for i in range(b_v - 1)]
-
-    if b_h > n_rows:
-        h_split = n_rows
-    if b_v > n_cols:
-        v_split = n_cols
-    # if x has only one row then do only vertical split
-    if x.shape[0] == 1:
-        final_rects = np.split(x, v_split, axis = 1)
-
-        return final_rects
-
-    # if x has only one col then do only horizontal split
-    if x.shape[1] == 1:
-        final_rects = np.split(x, h_split, axis = 0)
-
-        return final_rects
-
-    # o/w do both splits
-    final_rects = []
-    h_rects = np.split(x, h_split, axis = 0)
-    for h_rect in h_rects:
-        v_rects = np.split(h_rect,  v_split, axis = 1)
-        for v_rect in v_rects:
-            final_rects.append(v_rect)
-
-    return final_rects
-
 
 def cantor_pairing(a, b):
     """
@@ -202,8 +155,7 @@ def reduction_matrix(mapping, canonical_order=False):
     cols = np.arange(n)
     rows = inverse
 
-    return sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int)
-
+    return EkteloMatrix(sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int))
 
 def expansion_matrix(mapping, canonical_order=False):
     """ Returns an n x m matrix E where n is the dimension of 
@@ -228,8 +180,7 @@ def expansion_matrix(mapping, canonical_order=False):
     R = sparse.csr_matrix((data, (rows, cols)), shape=(m, n), dtype=int)
     scale = sparse.spdiags(1.0 /counts, 0, m, m)
 
-    return R.T * scale
-
+    return EkteloMatrix(R.T * scale)
 
 def projection_matrix(mapping, idx):
     """ Returns m x n matrix P where n is the dimension of the 
@@ -252,8 +203,7 @@ def projection_matrix(mapping, idx):
     vals = np.ones_like(rows)
     P = sparse.csr_matrix((vals, (rows, cols)), (rows.size, mask.size))
 
-    return P
-
+    return EkteloMatrix(P)
 
 def combine(p1, p2):
     """ Returns p3, an (n+m) dimensional array of integers such that
@@ -277,7 +227,6 @@ def combine_all(mappings):
     """ Returns an ndarray with each dimension corresponding to one
         of mapping.
     """
-    # Note(ryan): test to make sure combine is associative
     return reduce(combine, mappings, np.ones((), dtype=int))
 
 
@@ -315,15 +264,3 @@ def complement(A, grid_size=None):
         comp.append(q)
 
     return sparse.csr_matrix(comp)
-
-
-
-# When comparing with previous implementation with Workload from dpcomp_core
-#def get_matrix(W):
-#    return W.get_matrix() if isinstance(W, workload.Workload) \
-#            or isinstance(W, dpcomp_core.workload.Workload) else W
-
-def get_matrix(W):
-    ''' convient method to check and get workload matrix '''
-    return W.get_matrix() if isinstance(W, workload.Workload) else W
-    

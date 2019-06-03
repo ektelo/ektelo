@@ -8,244 +8,23 @@ from scipy import sparse
 from scipy.linalg import block_diag
 import itertools
 import math
+import ektelo
 from ektelo import util
 from ektelo import support
 from ektelo.operators import SelectionOperator
+from ektelo import matrix, workload
 from functools import reduce
-
-def flatten_measurements(m, dsize, sparse_flag = 1):
-    ''' Given a list of coordinates (each row corresponds to one query)
-        it returns a set of measurements in the desired format.
-        sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
-    '''
-    all_measurements = []
-
-    for measurement in m:
-        M = np.zeros(dsize).astype(np.int8)
-        flat_indices = measurement.flatten()
-        M[flat_indices] = 1
-        if sparse_flag == 1:
-            M = sparse.csr_matrix(M)
-        all_measurements.append(M)
-    if sparse_flag == 1:
-        s = sparse.vstack(all_measurements, format = 'csr')
-    else:
-        s = np.array(all_measurements)
-
-    return s
-
-
-def rect_to_quads(x):
-    '''
-    Given an np array it splits it correctly to 4 quads in the midpoints
-    can handle arrays of arbitrary shape (1D as well)
-    '''
-
-    n_rows = x.shape[0]
-    n_cols = x.shape[1]
-    # If ncol is odd, do vert splits in balanced manner
-    col_parity = 0
-    if n_cols % 2:
-        col_parity = 1
-    col_midpoint = util.old_div(x.shape[1],2)
-    row_midpoint = util.old_div(x.shape[0],2)
-
-    if x.shape[0] == 1:
-        # if x has only one row then do only vertical split
-        x1, x2 = np.split(x, [col_midpoint], axis = 1)
-        return [x1, x2]
-
-    if x.shape[1] == 1:
-        # if x has only one col then do only horizontal split
-        x1, x2 = np.split(x, [row_midpoint], axis = 0)
-        return [x1, x2]
-
-    # o/w do both splits
-    x_h1, x_h2 = np.split(x, [row_midpoint], axis = 0)
-    x1, x2 = np.split(x_h1,  [col_midpoint], axis = 1)
-    x3, x4 = np.split(x_h2,  [col_midpoint + col_parity], axis = 1)
-
-    return [x1, x2, x3, x4]
-
-
-def variance(N, b):
-    '''Computes variance given domain of size N
-    and branchng factor b.  Equation 3 from paper.'''
-    h = math.ceil(math.log(N, b))
-
-    return ( ((b - 1) * h**3) - (util.old_div((2 * (b+1) * h**2), 3)))
-
-
-def buildHierarchical_ios(n, b):
-    '''
-    Does the same with buildHierarchical with the following differences:
-        - Does not support different branching factors per level
-        - Supports domain sizes that are not powers of the branching factor
-    Note (ios): tested the equivalence between buildHierarchical_ios and buildHierarchical
-    on domain sizes in [2, 4, 8, ..., 8192] for b = 2. Both functions produce the same set of queries.
-    The new function is up to x4 faster.
-    '''
-    nodes       = {}
-    root        = list(range(n))
-    n_id        = 0
-    nodes[n_id] = root
-    pending     = [n_id]
-    cur_id      = 0
-
-    while len(pending) != 0:
-        # Pop an ID from pending
-        cur_id  = pending.pop()
-        node    = nodes[cur_id]
-        children = split_b_ways(node, b)
-        for child in children:
-            n_id         += 1
-            nodes[n_id]  = child
-            if len(child) > 1:
-                pending.append(n_id)
-    # Post process for the correct format
-    tree = list(nodes.values())
-    M = []
-    for node in tree:
-        m = np.zeros(n)
-        m[node] = 1
-        M.append(m)
-
-    return np.array(M).astype(int)
-
-
-def buildHierarchical_sparse(n, b):
-    '''
-    Builds a sparsely represented (csr_matrix) hierarchical matrix
-    with n columns and a branching factor of b.  Works even when n
-    is not a power of b
-    '''
-    if n == 1:
-        return sparse.csr_matrix([1.0])
-    if n <= b:
-        a = np.ones(n)
-        b = sparse.identity(n, format='csr')
-        return sparse.vstack([a, b])
-
-    # n = mb + r where r < b
-    # n = (m+1) r + m (b-r)
-    # we need r hierarchical matrices with (m+1) cols
-    # and (b-r) hierarchical matrices with m cols
-    m, r = divmod(n, b)
-    hier0 = buildHierarchical_sparse(m, b) # hierarchical matrix with m cols
-    if r > 0:
-        hier1 = buildHierarchical_sparse(m+1, b) # hierarchical matrix with (m+1) cols
-
-    # sparse.hstack doesn't work when matrices have 0 cols
-    def hstack(left, hier, right):
-        if left.shape[1] > 0 and right.shape[1] > 0:
-            return sparse.hstack([left, hier, right])
-        elif left.shape[1] > 0:
-            return sparse.hstack([left, hier])
-        else:
-            return sparse.hstack([hier, right])
-
-    res = [np.ones(n)]
-    for i in range(r):
-        rows = hier1.shape[0]
-        start = (m+1)*i
-        end = start + m+1
-        left = sparse.csr_matrix((rows, start))
-        right = sparse.csr_matrix((rows, n-end))
-        res.append(hstack(left, hier1, right))
-    for i in range(r, b):
-        # (m+1) r + m (b-r) = (m+1) r + m (b-i) + m (i-r)
-        rows = hier0.shape[0]
-        start = (m+1)*r + m*(i-r)
-        end = start + m
-        left = sparse.csr_matrix((rows, start))
-        right = sparse.csr_matrix((rows, n-end))
-        res.append(hstack(left, hier0, right))
-
-    return sparse.vstack(res, format='csr')
-
-
-def find_best_branching(N):
-    '''
-    Technique from Qardaji et al. PVLDB 2013.
-    Try all branchings from 2 to N and pick one
-    with minimum variance.
-    N in this context is domain size
-    '''
-    min_v = float('inf')
-    min_b = None
-    for b in range(2,N+1):
-        v = variance(N, b)
-        if v < min_v:
-            min_v = v
-            min_b = b
-
-    return min_b
-
-
-def Hb2D(n, m, b_h, b_v, sparse = 1):
-    ''' Implementation of Hb for 2D histograms
-            (n,m): the shape of x
-            b_v, b_h = the vertical and horizontal branching factorr respectively
-            sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
-    '''
-    dsize = n * m
-    x = np.arange(dsize).reshape(n, m)
-
-    # Avoid doing recursion, python is notoriously bad at it
-    pending         = [x]
-    measurement_coo = []
-    while len(pending) != 0:
-        cur_rect = pending.pop()
-        # if it's a leaf then we don't want to split it anymore
-        if cur_rect.shape[0] * cur_rect.shape[1] > 1:
-            # split the current rectangle to rectangles according to the branching factors
-            sub_rects = support.split_rectangle(cur_rect, b_v, b_h)
-            for rect in sub_rects:
-                measurement_coo.append(rect)
-                pending.append(rect)
-
-    # Flatten the measurements to correspond to the flattened x vector
-    M = flatten_measurements(measurement_coo, dsize, sparse)
-
-    return M
-
-
-def quadtree(n, m, sparse = 1):
-    ''' Quadtree function, accepts a shape (n, m)
-        and returns a set of measurements in sparse format on the expanded x vector
-        n and m can be arbitrary numbers
-        sparse: flag that denotes if the returnred measurements are
-                in an np.array format or scipy.sparse format
-    '''
-    dsize = n * m
-    x = np.arange(dsize)
-    x = x.reshape(n,m)
-
-    # Avoid doing recursion, python is notoriously bad at it
-    pending        = [x]
-    measurement_coo = [x]
-    while len(pending) != 0:
-        cur_quad = pending.pop()
-
-        # if it's a leaf then we don't want to split it anymore
-        if cur_quad.shape[0] * cur_quad.shape[1] > 1:
-            sub_quads = rect_to_quads(cur_quad)
-            for quad in sub_quads:
-                measurement_coo.append(quad)
-                pending.append(quad)
-
-    # Flatten the measurements to correspond to the flattened x vector
-    M = flatten_measurements(measurement_coo, dsize, sparse)
-
-    return M
 
 
 def GenerateCells(n,m,num1,num2,grid):
-    # this function used to generate all the cells in UGrid
+    '''
+    Generate grid shaped celles for UniformGrid and AdaptiveGrid.and
+    n, m: 2D domain shape
+    num1, num2: number of cells along two dimensions
+    grid: grid size
+    '''
     assert math.ceil(util.old_div(n,float(grid))) == num1 and math.ceil(util.old_div(m,float(grid))) == num2, "Unable to generate cells for Ugrid: check grid number and grid size"
-    cells = []
+    lower, upper = [], []
     for i in range(num1):
         for j in range(num2):
             lb = [int(i*grid),int(j*grid)]
@@ -255,35 +34,336 @@ def GenerateCells(n,m,num1,num2,grid):
             if rb[1] >= m:
                 rb[1] = int(m-1)
 
-            cells = cells + [[lb,rb]]
+            lower.append(lb)
+            upper.append(rb)
 
-    return cells
+    return lower, upper
 
-
-def cells_to_query(cells,domain):
+class HierarchicalRanges(SelectionOperator):
+    ''' 
+    ND hiearchical selection operator
+    At any level of the Hiearchy, the domain is partitioned using some
+    data-independent function. This class provide efficient implementation
+    to generate the lower and upper boudaries through the ranges_gen() function.
     '''
-    helper function
-    :param cells: UGrid cells represented as upper-left and lower-right coordinates(inclusive range)
-    :param domain: tuple indicating the domain of queries.
-    :return: workload represented as a sparse matrix, each row is a query with the flattened domain.
+
+    def __init__(self, domain_shape, include_root, fast_leaves, split_func, **kwargs):
+        self.domain_shape = domain_shape
+        self.include_root = include_root
+        self.fast_leaves = fast_leaves
+        self.split_func = split_func
+        self.kwargs = kwargs
+
+
+    @staticmethod    
+    def same_shape(rect_l, rect_u):
+        '''
+        Check the shape of all candidate rects,
+        return the indices in groups with the same shape
+        '''
+        dic = dict()
+        shape = np.array(rect_u) - np.array(rect_l)
+        for i in range(len(shape)):
+            s = tuple(shape[i])
+            if s in dic:
+                dic[s].append(i)
+            else:
+                dic[s] = [i]
+        return list(dic.values())
+
+    @staticmethod
+    def quick_product(*arrays):
+        '''
+        Quick calculation of cross products of a list of arrays.
+        Return the sum of each result
+        '''
+        la = len(arrays)
+        arr = np.empty([la] + [len(a) for a in arrays], dtype='int')
+        for i, a in enumerate(np.ix_(*arrays)):
+            arr[i, ...] = a
+        return arr.reshape(la, -1)
+
+    @staticmethod
+    def expand_offsets(cur_rect_l, cur_rect_u, offsets):
+        '''
+        Expand offsets at different level along each dimension to generate the 
+        final offsets for all candidate by computing the sum of each tuple in the 
+        cross product of offset arrays.
+        e.g For the some dimension two level offsets [[0, 1, 0], [2, 4, 2]] will be expanded to 
+        [2 4 2 3 5 3 2 4 2]
+        cur_rect_l and cur_rect_u: coordinates of the lower and upper corner of the range.
+        offsets: Nested array representing offsets of ranges along dimension, level of hierarchy    
+
+        ''' 
+        # remove empty list(no query at this level)
+        offsets = [list(filter(lambda x: len(x) > 0, d)) for d in offsets]
+        assert all([len(d) == len(offsets[0]) for d in offsets]),\
+               "Shape of offsets along each dimension should match."    
+        if len(offsets[0]) < 1:
+            return [], []   
+        # expand offsets across different levels.
+        expanded_offsets = [HierarchicalRanges.quick_product(*d).sum(axis=0) for d in offsets] 
+        lower = np.vstack([ l + offset for l, offset in zip(cur_rect_l, expanded_offsets)]).T
+        upper = np.vstack([ u + offset for u, offset in zip(cur_rect_u, expanded_offsets)]).T
+        return lower, upper
+
+    @staticmethod
+    def grid_split_range(cur_range_l, cur_range_u, **kwargs):
+        """
+        Split ND-range into grids according to branching factors along each dimension
+        cur_range_l, cur_range_u: coordinates of the lower and upper boundary 
+        kwargs: needs to have a 'branching_list' memeber with the branching factor along each dimension
+        """
+        branchings = kwargs['branching_list']
+        dim_lens = np.array(cur_range_u) - np.array(cur_range_l) + 1
+        assert len(branchings) == len(dim_lens), "The numbers of dimension and branching factors need to match"
+        def get_boarder(dim_len, branching):
+            if branching > dim_len:
+                split_num = dim_len
+                boarder = [ (i, i) for i in range(split_num)]
+            elif dim_len % branching != 0:
+                new_hsize = np.divide(float(dim_len), branching)
+                split_num = [np.ceil(new_hsize * (i + 1)).astype(int) for i in range(branching - 1)]
+                temp = [i -1 for i in split_num]
+                boarder = list(zip(([0] + split_num), (temp + [dim_len-1])) )
+            else:
+                cell_size_h = util.old_div(dim_len, branching)
+                boarder = [(i * cell_size_h, (i+1) * cell_size_h - 1) for i in range(branching)]
+            return boarder
+        # get back boarder along each dimension
+        boarder_list = [get_boarder(d, b) for d, b in zip(dim_lens, branchings)]
+
+        try:
+            # use quick_product to calculate crossproduct if all dimensions breaks into the same shape
+            lower, upper = np.array(boarder_list).transpose([2,0,1])
+            lower_list = HierarchicalRanges.quick_product(*lower).T
+            upper_list = HierarchicalRanges.quick_product(*upper).T
+        except ValueError:
+            # else fall back to standard crossproduct, will be slower when results size get large
+            x = np.array(list(itertools.product(*boarder_list)))
+            lower_list, upper_list = x.transpose([2,0,1])
+        
+        lower_list = lower_list + cur_range_l
+        upper_list = upper_list + cur_range_l
+        return lower_list, upper_list
+
+    @staticmethod
+    def ranges_gen(start_range_l, start_range_u, include_root, include_leaf, split_func, **kwargs):
+        '''
+        Fast Hierarchical range generation method by iteratively partitioning the domain and 
+        resusing subpartition of the same shape. At each level, only one canonical range is stored for all 
+        ranges of the same shape, and any range is represented as a offset. 
+        
+        start_range_l, start_range_u: lower and upper boundaries of top level range to start with
+        include_root: include the root node(start_range) if set to True 
+        include_leave: include the leaf nodes(cells of size 1) if set to True
+        split_func: spliting function at each level, takes parameter (cur_range_l, cur_range_u, **kwargs)
+                    cur_range_l, cur_range_u are the lower and upper boundardy of the range to be split.
+        **kwargs: argument list, will be passed into split_func
+        Return: list of lower and upper bound
+
+        '''
+        # Avoid doing recursion, python is notoriously bad at it
+        assert len(start_range_l) == len(start_range_u), \
+                "Dimesions of lower and upper boundaries shoud match"
+        pending_l, pending_u = [start_range_l], [start_range_u]
+        dimension = len(start_range_l)
+        # List of pending offsets: dimension, level, duplicates within level.
+        pending_offsets = [[[np.array([0], dtype='int')]] * dimension] if include_root \
+                        else [[[np.array([], dtype='int')]] * dimension]
+        selected_ranges_l, selected_ranges_u = [], [] 
+        
+        while len(pending_l) != 0:
+            cur_range_l = pending_l.pop()
+            cur_range_u = pending_u.pop()
+            cur_offset = pending_offsets.pop()
+            # Resolve offsets in any pending ranges
+            lower, higher = HierarchicalRanges.expand_offsets(cur_range_l, cur_range_u, cur_offset)
+            selected_ranges_l.extend(lower)
+            selected_ranges_u.extend(higher) 
+            sub_ranges_l, sub_ranges_u = split_func(cur_range_l, cur_range_u, **kwargs)
+            # Put subranges of same shapes into groups, select the first subrect as canonical 
+            # and represent the rest using offsets. 
+            same_shape_groups = HierarchicalRanges.same_shape(sub_ranges_l, sub_ranges_u)
+            for group_idx in same_shape_groups:
+                sub_ranges_l_group = np.array(sub_ranges_l)[group_idx]
+                sub_ranges_u_group = np.array(sub_ranges_u)[group_idx]
+                # Select the first range as the canonical range of the group
+                canonical_range_l, canonical_range_u = sub_ranges_l_group[0], sub_ranges_u_group[0]
+                canonical_shape = [ u-l+1 for l,u in zip(canonical_range_l, canonical_range_u)]
+                # If it's a leaf don't add to pending rects,
+                # append Identity at the end of selection.
+                if np.prod(canonical_shape) > 1:
+                    new_offset = []
+                    for d in range(len(cur_offset)):
+                        offset_level = np.array(sub_ranges_l_group)[:, d] - canonical_range_l[d]
+                        # augment offset list by one level for each dimension
+                        new_offset.append(cur_offset[d] + [offset_level])
+                    # append the first quad in subgroup to pending list
+                    pending_l.append(sub_ranges_l_group[0])
+                    pending_u.append(sub_ranges_u_group[0])
+                    pending_offsets.append(new_offset)
+                elif include_leaf:
+                    # if include_leaf is set, then add to selected
+                    for l, u in zip(sub_ranges_l_group, sub_ranges_u_group):
+                        lower, higher = HierarchicalRanges.expand_offsets(l, u, cur_offset)
+                        selected_ranges_l.extend(lower)
+                        selected_ranges_u.extend(higher)
+
+        lower = np.array(selected_ranges_l, dtype=np.int32)
+        upper = np.array(selected_ranges_u, dtype=np.int32)
+        return lower, upper
+
+    def select(self):
+        dimension = len(self.domain_shape)
+        start_range_l = [0] * dimension
+        start_range_u = [d - 1 for d in self.domain_shape]
+
+        # Optimization using Identity as leaves measurements
+        if self.fast_leaves:
+            lower, upper = HierarchicalRanges.ranges_gen(
+                                                    start_range_l, 
+                                                    start_range_u,
+                                                    self.include_root, 
+                                                    False, 
+                                                    self.split_func, 
+                                                    **self.kwargs)
+
+            # If all selected queries are leaves, return Identity directly
+            if len(lower) == 0:
+                return  matrix.Identity(np.prod(self.domain_shape))
+            # Otherwise union M with Identity
+            M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
+            return matrix.VStack([M, matrix.Identity(np.prod(self.domain_shape))])
+
+        else:
+            lower, upper = HierarchicalRanges.ranges_gen(
+                                                    start_range_l, 
+                                                    start_range_u,
+                                                    self.include_root, 
+                                                    True, 
+                                                    self.split_func, 
+                                                    **self.kwargs)
+
+            # directly return results with leaves included
+            M = workload.RangeQueries(self.domain_shape, lower, upper, np.float32)
+            return M
+
+
+class H2(HierarchicalRanges):
+    ''' 
+    H2 select operator(ND): 
+    Adds hierarchical queries with uniform branching factor.
+    Works in an iterative top-down fashion splits each node V to create max{b, |V|} children and stops
+    when a node has 1 element. This creates a balanced tree with maximum number of nodes at each level
+    except (possibly) the last one.
     '''
-    query_number = len(cells)
-    domain_size = np.prod(domain)
-    matrix = sparse.lil_matrix((query_number, domain_size))
+    def __init__(self, domain_shape, branching=2, fast_leaves=True):
 
-    query_no = 0
-    for ul,lr in cells:
-        up, left = ul; low, right = lr
-        for row in range(up,low+1):
-            begin, end = np.ravel_multi_index([[row,row],[left,right]],domain)
-            matrix[query_no, begin:end+1] = [1]*(end-begin+1)
-        query_no+=1
+        dimension = len(domain_shape)
+        super(H2, self).__init__(domain_shape=domain_shape,
+                                 include_root=True,
+                                 fast_leaves=fast_leaves,
+                                 split_func=H2.grid_split_range,
+                                 branching_list=[branching]*dimension)
 
-    # convert to csr format for fast arithmetic and matrix vector operations
-    matrix = matrix.tocsr()
 
-    return matrix
 
+class HB(HierarchicalRanges):
+    '''
+    HB select operator(ND)
+    Add hierarchical queries with optimal branching factor, per Qardaji et al.
+    '''
+    def __init__(self, domain_shape, include_root=False, fast_leaves=True):
+
+        dimension = len(domain_shape)
+        branching = HB.find_best_branching(np.prod(domain_shape))
+
+        super(HB, self).__init__(domain_shape=domain_shape,
+                                 include_root=include_root,
+                                 fast_leaves=fast_leaves,
+                                 split_func=HB.grid_split_range,
+                                 branching_list=[branching]*dimension)
+
+    @staticmethod
+    def variance(N, b):
+        '''Computes variance given domain of size N
+        and branchng factor b.  Equation 3 from paper.'''
+        h = math.ceil(math.log(N, b))
+        return ( ((b - 1) * h**3) - (util.old_div((2 * (b+1) * h**2), 3)))
+
+    @staticmethod
+    def find_best_branching(N):
+        '''
+        Technique from Qardaji et al. PVLDB 2013.
+        Try all branchings from 2 to N and pick one
+        with minimum variance.
+        N in this context is domain size
+        '''
+        min_v = float('inf')
+        min_b = None
+        for b in range(2,N+1):
+            v = HB.variance(N, b)
+            if v < min_v:
+                min_v = v
+                min_b = b
+        return min_b
+
+
+class QuadTree(HierarchicalRanges):
+    '''
+    QuadTree Selection operator
+
+    '''
+    def __init__(self, domain_shape, fast_leaves=True):
+        assert len(domain_shape) == 2, \
+            "QuadTree selection is defined on 2D"
+        domain_shape = domain_shape
+
+        super(QuadTree, self).__init__(domain_shape=domain_shape,
+                                       include_root=True,
+                                       fast_leaves=fast_leaves,
+                                       split_func=QuadTree.quad_split_range)
+
+    @staticmethod
+    def quad_split_range(cur_range_l, cur_range_u, **kwarg):
+        '''
+        Given an rectangular domain represented using boarder cordinates (upper_left, lower_right),
+        it splits it correctly to 4 quads in the midpoints
+        '''
+        ul, lr = cur_range_l, cur_range_u
+        upper, left =  ul
+        lower, right = lr   
+
+        n_rows = lower - upper + 1
+        n_cols = right - left + 1   
+
+        # If ncol is odd, do vert splits in balanced manner
+        col_parity = 0
+        if n_cols % 2:
+            col_parity = 1
+        col_midpoint = left + util.old_div(n_cols, 2)
+        row_midpoint = upper + util.old_div(n_rows, 2)  
+
+        if n_rows == 1:
+            # if x has only one row then do only vertical split
+            row = lr[0]
+            return [ul, (row, col_midpoint)], [(row, col_midpoint - 1), lr]
+
+        if n_cols == 1:
+            # if x has only one col then do only horizontal split
+            col = lr[1]
+            return [ul, (row_midpoint, col)] , [(row_midpoint - 1, col), lr]
+
+        # o/w do both splits
+        q1 = (ul,                                        (row_midpoint - 1, col_midpoint - 1))
+        q2 = ((upper, col_midpoint),                     (row_midpoint - 1, right) )
+        q3 = ((row_midpoint, left),                      (lower, col_midpoint - 1 + col_parity))
+        q4 = ((row_midpoint, col_midpoint + col_parity), lr)
+
+        lower = [coordinates[0] for coordinates in [q1, q2, q3, q4] ]
+        upper = [coordinates[1] for coordinates in [q1, q2, q3, q4] ]
+        return lower, upper
 
 class Identity(SelectionOperator):
 
@@ -295,7 +375,8 @@ class Identity(SelectionOperator):
         self.domain_shape = domain_shape
 
     def select(self):
-        return sparse.identity(self.domain_shape[0])
+        return matrix.Identity(self.domain_shape[0])
+        #return sparse.identity(self.domain_shape[0])
 
 
 class Total(SelectionOperator):
@@ -308,73 +389,8 @@ class Total(SelectionOperator):
         self.domain_shape = domain_shape
 
     def select(self):
-        return np.ones((1, self.domain_shape[0]), dtype=np.float)
-
-
-class H2(SelectionOperator):
-    """
-    H2 select operator(1D): 
-    Adds hierarchical queries with uniform branching factor.
-    Works in an iterative top-down fashion splits each node V to create max{b, |V|} children and stops
-    when a node has 1 element. This creates a balanced tree with maximum number of nodes at each level
-    except (possibly) the last one.
-
-    """
-
-    def __init__(self, domain_shape, branching=2, matrix_form='sparse'):
-        super(H2, self).__init__()
-
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 1, 'Hierarchical selection only supports 1D and 2D domain shapes'
-        assert branching > 1
-        self.branching = branching
-        self.matrix_form = matrix_form
-        self.domain_shape = domain_shape
-        self.cache = np.ones((1, 1))
-
-    def select(self):
-        if self.domain_shape[0] == self.cache.shape[1]:
-            h_queries = self.cache
-        elif self.matrix_form == 'dense':
-            h_queries = buildHierarchical_ios(self.domain_shape[0], self.branching)
-        else:
-            h_queries = buildHierarchical_sparse(self.domain_shape[0], self.branching)
-
-        return h_queries
-
-
-class HB(SelectionOperator):
-    '''
-    HB select operator(1D and 2D)
-    Add hierarchical queries with optimal branching factor, per Qardaji et al.
-    '''
-
-    def __init__(self, domain_shape, sparse_flag=1):
-        super(HB, self).__init__()
-
-        assert (isinstance(domain_shape, tuple) and len(domain_shape) == 1
-                or len(domain_shape) == 2
-                ), 'HB selection only supports 1D and 2D domain shapes'
-        self.domain_shape = domain_shape
-        self.sparse_flag = sparse_flag
-
-    def select(self):
-        if len(self.domain_shape) == 1:
-
-            N = self.domain_shape[0]
-            branching = find_best_branching(N)
-            # remove root
-            h_queries = buildHierarchical_sparse(N, branching).tocsr()[1:]
-
-        elif len(self.domain_shape) == 2:
-            N = self.domain_shape[0] * self.domain_shape[1]
-            branching = find_best_branching(N)
-            h_queries = Hb2D(self.domain_shape[0], 
-                             self.domain_shape[1],
-                             branching, 
-                             branching, 
-                             self.sparse_flag)
-        return h_queries
+        return workload.Total(self.domain_shape[0])
+        #return np.ones((1, self.domain_shape[0]), dtype=np.float)
 
 
 class GreedyH(SelectionOperator):
@@ -390,11 +406,7 @@ class GreedyH(SelectionOperator):
         self._granu = granu
 
     def select(self):
-        if not isinstance(self.W, np.ndarray):
-            W = self.W.toarray()
-        else:
-            W = self.W
-        QtQ = np.dot(W.T, W)
+        QtQ = self.W.gram().dense_matrix()
         n = self.domain_shape[0]
         err, inv, weights, queries = self._GreedyHierByLv(
             QtQ, n, 0, withRoot=False)
@@ -409,7 +421,7 @@ class GreedyH(SelectionOperator):
         mat = np.vstack(row_list)
         mat = sparse.csr_matrix(mat) if sparse.issparse(mat) is False else mat
 
-        return mat
+        return matrix.EkteloMatrix(mat)
 
     def _GreedyHierByLv(self, fullQtQ, n, offset, depth=0, withRoot=False):
         """Compute the weight distribution of one node of the tree by minimzing
@@ -485,18 +497,6 @@ class GreedyH(SelectionOperator):
             [[offset, offset + n - 1]] + list(itertools.chain(*sq))
 
 
-class QuadTree(SelectionOperator):
-
-    def __init__(self, domain_shape, sparse_flag=1):
-        super(QuadTree, self).__init__()
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 2, "QuadTree selection only workss for 2D"
-        self.domain_shape = domain_shape
-        self.sparse_flag = sparse_flag
-
-    def select(self):
-        strategy = quadtree(self.domain_shape[0], self.domain_shape[1], self.sparse_flag)
-        return strategy
 
 
 class UniformGrid(SelectionOperator):
@@ -543,19 +543,15 @@ class UniformGrid(SelectionOperator):
         num1 = int(util.old_div((n - 1), grid) + 1)
         num2 = int(util.old_div((m - 1), grid) + 1)
 
-        # TODO: potential optimization if grid ==1 identity workload
-        cells = GenerateCells(n, m, num1, num2, grid)
-        matrix = cells_to_query(cells, (n, m))
-
-        return matrix
+        lower, upper = GenerateCells(n, m, num1, num2, grid)
+        return workload.RangeQueries((n, m), np.array(lower), np.array(upper))
 
 
-class AdaptiveGrid(SelectionOperator):
+class AdaptiveGrid(HierarchicalRanges):
 
     def __init__(self, domain_shape, x_hat, eps_par, c2=5):
         assert isinstance(domain_shape, tuple) and len(
             domain_shape) == 2, "AdptiveGrid selection only works for 2D"
-        super(AdaptiveGrid, self).__init__()
 
         self.domain_shape = domain_shape
         self.x_hat = x_hat
@@ -569,8 +565,7 @@ class AdaptiveGrid(SelectionOperator):
 
         if shape == (1, 1):
             # skip the calucation of newgrids if shape is of size 1
-            matrix = sparse.csr_matrix(([1], ([0], [0])), shape=(1, 1))
-            newgrid = 1
+            return workload.RangeQueries((1,1), lower=np.array([[0,0]]), higher=np.array([[0,0]]))
 
         else:
             eps = self.eps_par
@@ -588,105 +583,57 @@ class AdaptiveGrid(SelectionOperator):
                 newgrid = 1
             num1 = int(util.old_div((nn - 1), newgrid) + 1)
             num2 = int(util.old_div((mm - 1), newgrid) + 1)
+
             # generate cell and pending queries base on new celss
-            cells = GenerateCells(nn, mm, num1, num2, newgrid)
-            matrix = cells_to_query(cells, (nn, mm))
+            lower, higher = AdaptiveGrid.grid_split_range( (0,0), (nn - 1, mm - 1) , branching_list=[num1, num2])
+            
+        return workload.RangeQueries(self.domain_shape, np.array(lower), np.array(higher))
 
-        return matrix
+class HD_IHB(SelectionOperator):
+    '''
+    fast global selection for HB_STRIPED
+    '''
+    def __init__(self, domain_shape, impl='MM', hb_dim=-1):
+        self.init_params = util.init_params_from_locals(locals())
+        self.domain_shape = domain_shape
+        self.impl = impl
+        self.hb_dim = hb_dim # default to last dimension
 
+    def select(self):
+        N = self.domain_shape[self.hb_dim]
+        domains = list(self.domain_shape)
+        del domains[self.hb_dim]
+
+        if self.impl == 'MM':
+            I = matrix.Identity(int(np.prod(domains)))
+            H = HB((N,)).select()
+        elif self.impl == 'sparse':
+            I = matrix.Identity(int(np.prod(domains))).sparse_matrix()
+            H = HB((N,)).select().sparse_matrix()
+        elif self.impl == 'dense':
+            I = matrix.Identity(int(np.prod(domains))).dense_matrix()
+            H = HB((N,)).select().dense_matrix()
+        else:
+            print("Invalid measurement type", self.impl)
+            exit(1)
+        return matrix.Kronecker([I, H])
 
 class Wavelet(SelectionOperator):
     '''
     Adds wavelet matrix as measurements
     '''
-    #TODO: handle 2D
 
     def __init__(self, domain_shape):
         super(Wavelet, self).__init__()
 
-        assert isinstance(domain_shape, tuple) and len(
-            domain_shape) == 1, 'Wavelet selection only supports 1D  domain shapes'
-
         self.domain_shape = domain_shape
-
-
-    @staticmethod
-    def wavelet_sparse(n):
-        '''
-        Returns a sparse (csr_matrix) wavelet matrix of size n = 2^k
-        '''
-        if n == 1:
-            return sparse.identity(1, format='csr')
-        m, r = divmod(n, 2)
-        assert r == 0, 'n must be power of 2'
-        H2 = Wavelet.wavelet_sparse(m)
-        I2 = sparse.identity(m, format='csr')
-        A = sparse.kron(H2, [1,1])
-        B = sparse.kron(I2, [1,-1])
-        return sparse.vstack([A,B])
-
-    @staticmethod
-    def remove_duplicates(a):
-        ''' 
-        Removes duplicate rows from a 2d numpy array
-        '''
-        a = np.ascontiguousarray(a)
-        unique_a = np.unique(a.view([('', a.dtype)]*a.shape[1]))
-        return unique_a.view(a.dtype).reshape((unique_a.shape[0], a.shape[1]))[::-1]
-
-    @staticmethod
-    def power(n, b):
-        '''
-        Helper function for domain sizes and branching
-        Returns exponent exp such that n == b ** exp when n is a power of b
-        Otherwise returns closest exp and remainder, so that n == b ** exp + rem
-        '''
-        exp = int(math.log(n, b))
-        rem = n - (b ** exp)
-        return exp, rem
-    
-    @staticmethod
-    def wavelets(n):
-        """
-        can deal with domain sizes that are not powers of 2
-        """
-        height, rem = Wavelet.power(n, 2)
-        diff = 0
-        if rem != 0:
-            height += 1
-            diff    = 2 ** (height) - n
-            n       = 2 ** (height)
-        M = [np.ones(n)]
-        step = 2*n
-        for h in range(height):
-            n_nodes = 2 ** h
-            step //= 2
-            for node in range(n_nodes):
-                x     = np.zeros(n)
-                start = node * step
-                mid   = int ((node + 0.5) * step)
-                end   = (node + 1)   * step
-
-                x[start:mid] =  1
-                x[mid:end]   = -1
-                M.append(x)
-        M = np.delete(M, np.arange(diff) + n - diff ,  axis = 1)
-        if rem!= 0:
-            M = Wavelet.remove_duplicates(M)
-        return M
-
+        assert all(n & (n-1) == 0 for n in domain_shape),\
+                'each dimension of domain must be a power of 2'
 
     def select(self):
-        n = self.domain_shape[0]
-
-        if (n != 0 and ((n) & (n-1)) ==0):
-            # if power of 2
-            wavelet_query = Wavelet.wavelet_sparse(n)
-        else:
-            wavelet_query = Wavelet.wavelets(n)
-
-        return wavelet_query
-
+        if len(self.domain_shape) == 1:
+            return matrix.Haar(self.domain_shape[0])
+        return matrix.Kronecker([matrix.Haar(n) for n in self.domain_shape])
 
 class AddEquiWidthIntervals(SelectionOperator):
     """
@@ -695,11 +642,13 @@ class AddEquiWidthIntervals(SelectionOperator):
     """
     def __init__(self, W, log_width):
         super(AddEquiWidthIntervals, self).__init__()
-        self.M_hat = support.extract_M(W)   # expects W to contain a single measurement
+        #self.M_hat = support.extract_M(W)   # expects W to contain a single measurement
+        self.M_hat = W.sparse_matrix()
         self.grid_size = min(2 ** log_width, self.M_hat.shape[1])
 
     def select(self):
-        return sparse.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        mat = sparse.vstack((self.M_hat, support.complement(self.M_hat, self.grid_size)))
+        return matrix.EkteloMatrix(mat)
 
 class HDMarginal(SelectionOperator):
 

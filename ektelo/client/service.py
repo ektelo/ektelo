@@ -109,10 +109,10 @@ class ProtectedDataSource(object):
                            eps, 
                            {'theta': theta, 'domain_shape': domain, 'eps': eps})
 
-    def worst_approx(self, W, W_partial, x_hat, eps, mechanism='EXPONENTIAL'):
+    def worst_approx(self, W, measuredQueries, x_hat, eps, mechanism='EXPONENTIAL'):
         return self.select(pselection.WorstApprox.__name__, 
                            eps, 
-                           {'W': W, 'W_partial': W_partial, 'x_est': x_hat, 'eps': eps, 'mechanism': mechanism})
+                           {'W': W, 'measuredQueries': measuredQueries, 'x_est': x_hat, 'eps': eps, 'mechanism': mechanism})
 
     def _clone(self, private_node, data_node):
         return ProtectedDataSource(self.kernel_service,

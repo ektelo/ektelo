@@ -1,547 +1,495 @@
-from __future__ import division
-from builtins import str
-from builtins import zip
-from builtins import range
-import copy
-import hashlib
+from ektelo import matrix
+from ektelo.matrix import EkteloMatrix, Identity, Ones, VStack, Kronecker, Sum, Weighted
+import collections
+import functools
 import itertools
-import numpy
-from ektelo.mixins import Marshallable
-from ektelo.mixins import CartesianInstantiable
-from ektelo.query_nd_union import ndRangeUnion
-from ektelo import util
+import numpy as np
+from scipy.special import binom
 from scipy import sparse
-from scipy.sparse import linalg
-from functools import reduce
+from scipy.sparse.linalg import spsolve_triangular
 
-"""
-These classes define workloads
-"""
+def Total(n, dtype=np.float64):
+    """
+    The 1 x n matrix of 1s
+    :param n: the domain size
+    :return: the query matrix
+    """
+    return Ones(1,n,dtype)
 
-class Workload(Marshallable):
+def IdentityTotal(n, weight=1.0, dtype=np.float64):
+    """
+    The matrix [I; w*T] where w is the weight on the total query
+    :param n: the domain size
+    :param weight: the weight on the total query
+    :return: the query matrix
+    """
+    I = Identity(n, dtype)
+    T = Total(n, dtype)
+    w = dtype(weight)
+    return VStack([I, w*T])
 
-    def __init__(self, query_list, domain_shape):
-        """ Basic constructor takes list of ndQuery instances and a domain shape
-        """
-        self.domain_shape = domain_shape
-        self.query_list = query_list
-        self._matrix = {}
+class Prefix(EkteloMatrix):
+    """
+    The prefix workload encodes range queries of the form [0,k] for 0 <= k <= n-1
+    """
+    def __init__(self, n, dtype=np.float64):
+        self.n = n
+        self.shape = (n,n)
+        self.dtype = dtype
 
-    def compile(self):
+    def _matmat(self, V):
+        return np.cumsum(V, axis=0)
+
+    def _transpose(self):
+        return Suffix(self.n) 
+
+    @property
+    def matrix(self):
+        return np.tril(np.ones((self.n, self.n), self.dtype))
+    
+    def gram(self):
+        y = 1 + np.arange(self.n).astype(self.dtype)[::-1]
+        return EkteloMatrix(np.minimum(y, y[:,None]))
+    
+    def __abs__(self):
         return self
 
-    def get_matrix(self, matrix_format = 'sparse'):
-        """
-        Produces the matrix represenation of this workload on the flatten domain.
-        Note that W.evaluate(X) = W.get_matrix().dot(X.flatten()) where X is a ndarray 
-        with shape = W.domain_shape.
-
-        :param matrix_format: 'sparse' or 'dense' or 'linop'
-            'sparse' --> for a scipy sparse matrix (e.g., csr, bsr)
-            'dense' --> for a 2d numpy array
-            'linop' --> for a scipy sparse LinearOperator 
-        :returns: the matrix represenation of this workload
-
-        Notes for Practical Usage:
-        * All three return types support dot product and transpose dot product Wx and W^T x
-        * It's best to never materialize the matrix unless it is necessary to do so
-        * matrix_format='linop' should be used if the workload cannot be efficiently represented as a sparse matrix (e.g., prefix workload)
-        * matrix_format='sparse' should be used if the workload is sparse (e.g., Identity, AllMarginals) and you need matrix operations that are not supported by 'linop' such as indexing
-        * matrix_format='dense' should not be used unless the domain is small (<= 8192) 
-        """
-        if matrix_format in self._matrix:
-            pass
-        elif matrix_format == 'dense':
-            self._matrix['dense'] = self.compute_matrix_dense()
-        elif matrix_format == 'sparse':
-            self._matrix['sparse'] = self.compute_matrix_sparse()
-        elif matrix_format == 'linop':
-            self._matrix['linop'] = self.compute_matrix_linop()
-        return self._matrix[matrix_format]
-
-    matrix = property(get_matrix)
-
-    @property
-    def size(self):
-        return len(self.query_list)
-
-    def __add__(self, other):
-        """
-        Add two workloads defined on the same domain by concatenating their queries
-
-        :param other: the other workload to add
-        :returns: a new workload with queries from this workload and other workload
-
-        Notes: 
-        * It is preferable to use the Concatenate class instead of this operation
-        * Information about how to efficiently compute the workload matrix is lost
-            when using this operation.
-        * It's okay to use this operation if you will never need the workload matrix, 
-            the domain size is small, or you prefer elegance to performance
-        """
-
-        assert self.domain_shape == other.domain_shape, 'domain shapes must match'
-        return Workload(self.query_list + other.query_list, self.domain_shape)
-
-    def compute_matrix_sparse(self):
-        rows = len(self.query_list)
-        cols = numpy.prod(self.domain_shape)
-        flatidx = numpy.arange(cols).reshape(self.domain_shape)
-        matrix = sparse.lil_matrix((rows, cols))
-        for q, query in enumerate(self.query_list):
-            for lb, ub, wgt in query.ranges:
-                s = [slice(l, u+1) for l, u in zip(lb, ub)]
-                idx = flatidx[s].flatten()
-                matrix[q, idx] += numpy.repeat(wgt, idx.size)
-        return matrix.tocsr()
-
-    def compute_matrix_dense(self):
-        rows = [r.asArray(self.domain_shape).flatten() for r in self.query_list]
-        n = rows[0].size
-        m = len(rows)
-        matrix = numpy.empty(shape=(m,n))
-        for (i,row) in enumerate(rows):
-            matrix[i,:] = row
-        return matrix
-
-    # this is a default implemenation
-    # subclasses can optionally make it more efficient
-    def compute_matrix_linop(self):
-        return linalg.aslinearoperator(self.matrix)
-
-    def sensitivity(self):
-        # copied from utilities.py
-        ''' Compute sensitivity of a collection of ndRangeUnion queries '''
-        maxShape = tuple( [max(l) for l in zip(*[q.impliedShape for q in self.query_list])] )
-        array = numpy.zeros(maxShape)
-        for q in self.query_list:
-            array += q.asArray(maxShape)
-        return numpy.max(array)
-
-    def sensitivity_from_matrix(self):
-        """Return the L1 sensitivity of input matrix A: maximum L1 norm of the columns."""
-        return numpy.abs(self.matrix).sum(axis=0).max()
-
-    def evaluate_matrix(self, x):
-        return self.matrix.dot(x.ravel())
-
-    def evaluate(self,x):
-        '''evaluating the workload without materializing it
-        :param x: data to be evaluated, expressed in flattened form
-        :return : a list of queries answers'''
-        assert numpy.prod(self.domain_shape) == x.size
-        x= numpy.array(x, copy=True).reshape(self.domain_shape)
-        return numpy.array([q.eval(x) for q in self.query_list])
-
-    @property
-    def key(self):
-        """ Using leading 8 characters of hash as key for now """
-        return self.hash[:8]
-
-    def asDict(self):
-        d = util.class_to_dict(self, ignore_list=['matrix', 'query_list', '_matrix'])
-        return d
-
-    def analysis_payload(self):
-        return util.class_to_dict(self, ignore_list=['matrix', 'query_list', '_matrix'])
-
-class Prefix1D(Workload, CartesianInstantiable):
-    """ Workload of all 1D range queries with left bound equal to 0
-        (Prefix is not well-defined in higher dimensions)
+class Suffix(EkteloMatrix):
     """
-
-    def __init__(self, domain_shape_int, pretty_name='prefix 1D'):
-        self.init_params = util.init_params_from_locals(locals())
-
-        self.pretty_name = pretty_name
-
-        queries = [ndRangeUnion().add1DRange(0, c, 1.0) for c in range(domain_shape_int)]
-        super(self.__class__,self).__init__(queries, (domain_shape_int,))
-
-    def __repr__(self):
-        r = self.__class__.__name__ + '('
-        r += 'domain_shape_int=' + str(self.domain_shape[0]) + ')'
-        return r
-
-    def compute_matrix_linop(self):
-        n = numpy.prod(self.domain_shape)
-        def matvec(x):
-            return x.cumsum()
-        def rmatvec(x):
-            return x[::-1].cumsum()[::-1].astype(numpy.float64)
-        return linalg.LinearOperator((n,n), matvec, rmatvec, dtype=numpy.float64)
-
-    @staticmethod
-    def instantiate(params):
-        return Prefix1D(params['domain'])
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        return m.hexdigest()
-
-class RandomRange(Workload, CartesianInstantiable):
-    ''' Generate m random n-dim queries, selected uniformly from list of shapes and placed randomly in n-dim domain
-        shape_list: list of shape tuples
-        domain_shape: a shape tuple describing domain
-        m: number of queries in result
-        Note: for 1-dim, shapes must be unary tuples, e.g. (2,) (or see convenience method below)
-    '''
-
-    def __init__(self, shape_list, domain_shape, size, seed=9001, pretty_name='random range'):
-        self.init_params = util.init_params_from_locals(locals())
-
-        self.shape_list = copy.deepcopy(shape_list)
-        self.seed = seed
-        self.pretty_name = pretty_name
-        self._size = size
-
-        prng = numpy.random.RandomState(seed)
-        if shape_list == None:
-            shapes = randomQueryShapes(domain_shape, prng)
-        else:
-            prng.shuffle(self.shape_list)
-            shapes = itertools.cycle(self.shape_list) # infinite iterable over shapes in shape_list
-        queries = []
-        for i in range(size):
-            lb, ub = placeRandomly(next(shapes), domain_shape, prng)       # seed must be None or repeats
-            queries.append( ndRangeUnion().addRange(lb,ub,1.0) )
-        super(RandomRange,self).__init__(queries, domain_shape)
-
-    @staticmethod
-    def instantiate(params):
-        domain = params['domain']
-
-        try:
-            int(params['domain'])
-            domain = [domain]
-        except:
-            pass
-
-        shape_list = params['shape_list'] if 'shape_list' in params else None
-
-        return RandomRange(shape_list, domain, params['query_size'], params['work_seed'])
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(self._size)))
-        m.update(util.prepare_for_hash(str(util.standardize(self.shape_list))))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        return m.hexdigest()
-
-    @classmethod
-    def oneD(cls, shape_list, domain_shape_int, size, seed=9001):
-        ''' Convenience method allowing ints to be submitted in 1D case '''
-        if shape_list == None:
-            return cls(None,(domain_shape_int,), size, seed)
-        return cls([(i,) for i in shape_list], (domain_shape_int,), size, seed)
-
-
-def randomQueryShapes(domain_shape, prng):
-    ''' Generator that produces a list of range shapes; can be passed as iterator
-        domain_shape: is the shape tuple of the domain
-        prng: is numpy RandomState object
-    '''
-    while True:
-        shape = [prng.randint(1, dim+1, None) for dim in domain_shape]
-        yield tuple(shape)
-
-
-def placeRandomly(query_shape, domain_shape, prng=None):
-    ''' Place a n-dim query randomly in n-dim domain
-        Return lb tuple and ub tuple which can be used to construct a range query object
-    '''
-    if not prng:
-        prng = numpy.random.RandomState()
-
-    lb, ub = [], []
-    for i, val in enumerate(query_shape):
-        lower = prng.randint(0, domain_shape[i] - query_shape[i] + 1, None)
-        lb.append(lower)
-        ub.append(lower + query_shape[i] - 1)
-    return tuple(lb), tuple(ub)
-
-class Identity(Workload, CartesianInstantiable):
-    """ Identity workload for in k-dimensional domain """
-
-    def __init__(self, domain_shape, weight=1.0, pretty_name='identity'):
-        self.init_params = util.init_params_from_locals(locals())
-        self.weight = weight
-        self.pretty_name = pretty_name
-        if type(domain_shape) is int:
-            domain_shape = (domain_shape,)
-        indexes = itertools.product(*[list(range(i)) for i in domain_shape])   # generate index tuples
-        queries = [ndRangeUnion().addRange(i,i,weight) for i in indexes]
-        super(self.__class__,self).__init__(queries, domain_shape)
-
-    def compute_matrix_sparse(self):
-        return sparse.identity(numpy.prod(self.domain_shape))
-
-    @classmethod
-    def oneD(cls, domain_shape_int, weight=1.0):
-        return cls((domain_shape_int,), weight)
-
-    @staticmethod
-    def instantiate(params):
-        return Identity(params['domain'])
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(self.weight)))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        return m.hexdigest()
-
-class Total(Workload, CartesianInstantiable):
-    def __init__(self, domain_shape, pretty_name = 'total'):
-        self.pretty_name = pretty_name
-        if type(domain_shape) is int:
-            domain_shape = (domain_shape,)
-        lb = tuple(0 for _ in domain_shape)
-        ub = tuple(x-1 for x in domain_shape)
-        q = ndRangeUnion().addRange(lb, ub, 1.0)
-        super(self.__class__, self).__init__([q], domain_shape)
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        return m.hexdigest()
-        
-class Concatenate(Workload):
+    The suffix workload encodes range queries of the form [k, n-1] for 0 <= k <= n-1
     """
-    A class for constructing workloads of the same shape by concatenating their queries.
-    """
-    def __init__(self, workloads, pretty_name = 'concat'):
-        """
-        :param workloads: a list of workoads defined on the same domain
-        :param pretty_name: name of this workload (default = 'concat')
-        :returns: A new workload with all the queries from the given workloads
-        
-        Note: this class provides an efficient implementation of W.get_matrix
-        for matrix_format='sparse', 'dense', and 'linop' assuming there is an
-        efficient implementation in each of the given workloads.
-        """
-        self.pretty_name = pretty_name
-        self.workloads = workloads
-        assert len(workloads) >= 1, 'must have at least 1 workload'
-        domain_shape = workloads[0].domain_shape
-        assert all(w.domain_shape == domain_shape for w in workloads), 'shape mismatch'
-        query_list = []
-        for w in workloads:
-            query_list.extend(w.query_list)
-        super(Concatenate, self).__init__(query_list, domain_shape)
+    def __init__(self, n, dtype=np.float64):
+        self.n = n
+        self.shape = (n,n)
+        self.dtype = dtype
 
-    # TODO(ryan): if the purpose of overriding is for efficiency
-    # should we even worry about dense matrices?
-    def compute_matrix_dense(self):
-        matrices = [w.compute_matrix_dense() for w in self.workloads]
-        return numpy.vstack(matrices)
-
-    # overridden for efficiency
-    def compute_matrix_sparse(self):
-        matrices = [w.compute_matrix_sparse() for w in self.workloads]
-        return sparse.vstack(matrices).tocsr() # TODO(ryan): should we convert to csr?
-
-    def compute_matrix_linop(self):
-        linops = [w.compute_matrix_linop() for w in self.workloads]
-        sizes = [L.shape[0] for L in linops]
-        indices = numpy.cumsum(sizes)
-        n = numpy.prod(self.domain_shape)
-        m = sum(sizes)
-        def matvec(x):
-            return numpy.concatenate([L.matvec(x) for L in linops])
-        def rmatvec(x):
-            return sum(L.rmatvec(v) for L,v in zip(linops, numpy.split(x, indices)))
-        return linalg.LinearOperator((m,n), matvec, rmatvec, dtype=numpy.float64)
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        for w in self.workloads:
-            m.update(util.prepare_for_hash(w.hash))
-        return m.hexdigest()
-
-class Kronecker(Workload):
-    """
-    A class for constructing high dimensional workloads from low dimensional building blocks.
-
-    Roughly speaking, this class constructs a new workload by taking the cartesian product of 
-    queries from the input workloads.
-    """
-    def __init__(self, workloads, pretty_name = 'kronecker'):
-        """
-        :param workloads: a list of workoads defined on any combination of domains
-        :param pretty_name: name of this workload (default = 'kronecker')
-        :returns: A new high dimensional workload constructed by taking the
-            cartesian product of queries from the given workloads
-        
-        Note: this class provides an efficient implementation of W.get_matrix
-        for matrix_format='sparse', 'dense', and 'linop' assuming there is an
-        efficient implementation in each of the given workloads.  Thus it is
-        preferable to use this over the (lowercase) function kronecker.
-        """
-        self.pretty_name = pretty_name
-        self.workloads = workloads
-        this = kronecker(workloads)
-        super(Kronecker, self).__init__(this.query_list, this.domain_shape)
-
-    def compute_matrix_dense(self):
-        matrices = [w.compute_matrix_dense() for w in self.workloads]
-        return reduce(numpy.kron, matrices)
-
-    # overridden for efficiency
-    def compute_matrix_sparse(self):
-        matrices = [w.compute_matrix_sparse() for w in self.workloads]
-        return reduce(sparse.kron, matrices)
-        
-    # overridden for efficiency
-    # note that the linear operator will always be space efficient
-    # it will be most time efficient if the true LinearOperators are 
-    # on the last dimension (sparse matrices come first)
-    # if workloads = [S,S,S,L,S,S,S,L] --> [S,S,S,L,L,L,L,L] (bad)
-    # if workloads = [S,S,S,S,S,S,L,L] --> [S,S,S,S,S,S,L,L] (good)
-    # since reduce is left associative, the first linear operator it sees 
-    # will cause all subsequent objects to be linear operators too
-    # kron for linear operators is lazy, so there is some overhead to that
-    def compute_matrix_linop(self):
-        linops = [w.compute_matrix_linop() for w in self.workloads]
-        return reduce(linop_kron, linops) 
-
-    @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        for w in self.workloads:
-            m.update(util.prepare_for_hash(w.hash))
-        return m.hexdigest()
-
-class KWayMarginals(Concatenate, CartesianInstantiable):
-    """ Workload consisting of all K-way marginals where 0 <= k <= number of dimensions"""
-
-    def __init__(self, domain_shape, k, pretty_name = 'k-way marginals'):
-        self.init_params = util.init_params_from_locals(locals())
-        self.pretty_name = pretty_name
-        if type(domain_shape) is int:
-            domain_shape = (domain_shape,)
-        assert 0 <= k <= len(domain_shape), 'invalid k'
-        self.k = k
-        D = len(domain_shape)
-
-        idents = [Identity.oneD(n) for n in domain_shape]
-        totals = [Total(n) for n in domain_shape]
-
-        workloads = []
-        for c in itertools.combinations(list(range(D)), k):
-            oned = [idents[i] if i in c else totals[i] for i in range(D)]
-            workloads.append(Kronecker(oned))
-        super(self.__class__, self).__init__(workloads)
+    def _matmat(self, V):
+        return np.cumsum(V[::-1], axis=0)[::-1]
     
-    @staticmethod
-    def instantiate(params):
-        return KWayMarginals(params['domain'],params['k'])
+    def _transpose(self):
+        return Prefix(self.n)
+    
+    @property
+    def matrix(self):
+        return np.triu(np.ones((self.n, self.n), self.dtype))
+    
+    def gram(self):
+        y = 1 + np.arange(self.n).astype(self.dtype)
+        return EkteloMatrix(np.minimum(y, y[:,None]))
 
-    @property 
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(self.k)))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        return m.hexdigest()
+    def __abs__(self):
+        return self
 
-class PrefixMarginals(Kronecker, CartesianInstantiable):
-    """ Workload consisting of Prefix queries on dimensions identified by prefix_axes
-        and marginals on all other axes
+class AllRange(EkteloMatrix):
     """
-
-    def __init__(self, domain_shape, prefix_axes=(0,), pretty_name='prefix marginals'):
-        self.init_params = util.init_params_from_locals(locals())
-        self.pretty_name = pretty_name
-        self.prefix_axes = prefix_axes
-        if type(domain_shape) is int:
-            domain_shape = (domain_shape,)
+    The AllRange workload encodes range queries of the form [i,j] for 0 <= i <= j <= n-1
+    """
+    def __init__(self, n, dtype=np.float64):
+        # note: transpose is not implemented, but it's not really needed anyway
+        self.n = n
+        self.shape = ((n*(n+1) // 2), n)
+        self.dtype = dtype
+        self._prefix = Prefix(n, dtype)
         
-        if len(domain_shape) - len(prefix_axes) > min(prefix_axes):
-            import warnings
-            warnings.warn('It is not recommended to construct PrefixMarginals this way.  Transpose the data so that the prefix workloads are on the last dimensions')
-            
+    def _matmat(self, V):
+        # probably not a good idea to ever call this function
+        # should use gram when possible because this workload is so large
+        # not gonna bother with a super efficient vectorized implementation
+        m = self.shape[0]
+        n = V.shape[1]
+        ans = np.vstack([np.zeros(n), self._prefix.dot(V)])
+        res = np.zeros((m, n))
+        for i, (a, b) in enumerate(itertools.combinations(range(self.n+1), 2)):
+            res[i] = ans[b] - ans[a]
+        return res
+    
+    @property
+    def matrix(self):
+        return self.dot(np.eye(self.n))
 
-        oned = []
-        for i, n in enumerate(domain_shape):
-            if i in self.prefix_axes:
-                oned.append( Prefix1D(n) )
+    def gram(self):
+        r = np.arange(self.n) + 1
+        X = np.outer(r, r[::-1])
+        return EkteloMatrix(np.minimum(X, X.T))
+
+class RangeQueries(matrix.Product):
+    """
+    This class can represent a workload of range queries, which are provided as input
+    to the constructor.
+    """
+    def __init__(self, domain, lower, higher, dtype=np.float64):
+        """
+        :param domain: the domain size, as an int for 1D or tuple for d-dimensional 
+            domains where each bound is a tuple with the same size as domain.
+        :param lower: a q x d array of lower boundaries for the q queries
+        :param higher: a q x d array of upper boundareis for the q queries
+        """
+        assert lower.shape == higher.shape, 'lower and higher must have same shape'
+        #assert np.all(lower <= higher), 'lower index must be <= than higher index'
+
+        if type(domain) is int:
+            domain = (domain,)
+            lower = lower[:,None]
+            higher = higher[:,None]
+        self.domain = domain
+        self.shape = (lower.shape[0], np.prod(domain))
+        self.dtype = dtype
+        self._lower = lower
+        self._higher = higher
+
+        idx = np.arange(np.prod(domain), dtype=np.int32).reshape(domain)
+        shape = (lower.shape[0], np.prod(domain))
+        corners = np.array(list(itertools.product(*[(False,True)]*len(domain))))
+        size = len(corners)*lower.shape[0]
+        row_ind = np.zeros(size, dtype=np.int32)
+        col_ind = np.zeros(size, dtype=np.int32)
+        data = np.zeros(size, dtype=dtype)
+        queries = np.arange(shape[0], dtype=np.int32) 
+        start = 0
+        
+        for corner in corners:
+            tmp = np.where(corner, lower-1, higher)
+            keep = np.all(tmp >= 0, axis=1)
+            index = idx[tuple(tmp.T)]
+            coef = np.sum(corner)%2 * 2 - 1
+            end = start + keep.sum()
+            row_ind[start:end] = queries[keep]
+            col_ind[start:end] = index[keep]
+            data[start:end] = -coef
+            start = end
+
+        self._transformer=sparse.csr_matrix((data[:end],(row_ind[:end],col_ind[:end])),shape,dtype)
+
+        P = Kronecker([Prefix(n, dtype) for n in domain])
+        T = EkteloMatrix(self._transformer)
+        matrix.Product.__init__(self, T, P)
+
+    @staticmethod
+    def fromlist(domain, ranges, dtype=np.float64):
+        """ create a matrix of range queries from a list of (lower, upper) pairs
+        
+        :param domain: the domain of the range queries
+        :param ranges: a list of (lower, upper) pairs, where 
+            lower and upper are tuples with same size as domain
+        """
+        lower, higher = np.array(ranges).transpose([1,0,2])
+        return RangeQueries(domain, lower, higher, dtype)
+    
+    @property
+    def matrix(self):
+        idx = np.arange(np.prod(self.domain), dtype=int).reshape(self.domain)
+        row_ind = []
+        col_ind = []
+        for i, (lb, ub) in enumerate(zip(self._lower, self._higher)):
+            s = tuple(slice(a,b+1) for a, b in zip(lb, ub))
+            j = idx[s].flatten()
+            col_ind.append(j)
+            row_ind.append(np.repeat(i, j.size))
+        row_ind = np.concatenate(row_ind)
+        col_ind = np.concatenate(col_ind)
+        data = np.ones_like(row_ind)
+        return sparse.csr_matrix((data, (row_ind, col_ind)), self.shape, self.dtype)
+
+    def __abs__(self):
+        return self
+
+    def unproject(self, offset, domain):
+        return RangeQueries(domain, self._lower+np.array(offset), self._higher+np.array(offset))
+
+class Marginal(Kronecker):
+    def __init__(self, domain, key):
+        """
+        :param domain: a d-tuple containing the domain size of the d attributes
+        :param key: a integer key 0 <= key < 2^d identifying the marginal
+        """
+        self.domain = domain
+        self.key = key
+        binary = self.binary()
+        subs = []
+        for i,n in enumerate(domain):
+            if binary[i] == 0:
+                subs.append(Total(n))
             else:
-                oned.append(Identity.oneD(n) + Total(n))
-        super(self.__class__, self).__init__(oned)
+                subs.append(Identity(n))
+        Kronecker.__init__(self, subs)
+
+    def binary(self):
+        i = self.key
+        d = len(self.domain)
+        return tuple([int(bool(2**k & i)) for k in range(d)])[::-1]
+
+    def tuple(self):
+        binary = self.binary()
+        d = len(self.domain)
+        return tuple(i for i in range(d) if binary[i] == 1)
 
     @staticmethod
-    def instantiate(params):
-        return PrefixMarginals(params['domain'], params['prefix_axes'])
+    def frombinary(domain, binary):
+        d = len(domain)
+        key = sum(binary[k]*2**(d-k-1) for k in range(d))
+        return Marginal(domain, key)
+
+    @staticmethod
+    def fromtuple(domain, attrs):
+        binary = [1 if i in attrs else 0 for i in range(len(domain))]
+        return Marginal.frombinary(domain, binary)
+
+class Marginals(VStack):
+    def __init__(self, domain, weights):
+        self.domain = tuple(domain)
+        self.weights = weights
+        subs = []
+        for key, wgt in enumerate(weights):
+            if wgt > 0: subs.append(wgt * Marginal(domain, key))
+        VStack.__init__(self, subs)   
+
+    def gram(self):
+        return MarginalsGram(self.domain, self.weights**2)
+   
+    def pinv(self):
+        # note: this is a generalized inverse, not necessarily the pseudo inverse though
+        return self.gram().pinv() * self.T
+
+    @staticmethod 
+    def frombinary(domain, weights):
+        vect = np.zeros(2**len(domain))
+        for binary, wgt in weights.items():
+            M = Marginal.frombinary(domain, binary)
+            vect[M.key] = wgt
+        return Marginals(domain, vect)
+
+    @staticmethod
+    def fromtuples(domain, weights):
+        vect = np.zeros(2**len(domain))
+        for tpl, wgt in weights.items():
+            M = Marginal.fromtuple(domain, tpl)
+            vect[M.key] = wgt
+        return Marginals(domain, vect)
+   
+    @staticmethod
+    def approximate(W):
+        """
+        Given a Union-of-Kron workload, find a Marginals workload that approximates it.
+        
+        The guarantee is that for all marginals strategies A, Error(W, A) = Error(M, A) where
+        M is the returned marginals approximation of W.
+        The other guarantee is that this function is idempotent: approx(approx(W)) = approx(W)
+        """
+        WtW = MarginalsGram.approximate(W.gram())
+        return Marginals(WtW.domain, np.sqrt(WtW.weights))
+
+class MarginalsGram(Sum):
+    def __init__(self, domain, weights):
+        self.domain = tuple(domain)
+        self.weights = weights
+        subs = []
+        n, d = np.prod(domain), len(domain)
+        mult = np.ones(2**d)
+        for key, wgt in enumerate(weights):
+            Q = Marginal(domain, key)
+            mult[key] = n / Q.shape[0]
+            if wgt != 0: subs.append(wgt * Q.gram())
+        self._mult = mult
+
+        Sum.__init__(self, subs)
+
+    def _Xmatrix(self,vect):
+        # the matrix X such that M(u) M(v) = M(X(u) v)
+        d = len(self.domain)
+        A = np.arange(2**d)
+        mult = self._mult
+
+        values = np.zeros(3**d)
+        rows = np.zeros(3**d, dtype=int)
+        cols = np.zeros(3**d, dtype=int)
+        start = 0
+        for b in range(2**d):
+            #uniq, rev = np.unique(a&B, return_inverse=True) # most of time being spent here
+            mask = np.zeros(2**d, dtype=int)
+            mask[A&b] = 1
+            uniq = np.nonzero(mask)[0]
+            step = uniq.size
+            mask[uniq] = np.arange(step)
+            rev = mask[A&b]
+            values[start:start+step] = np.bincount(rev, vect*mult[A|b], step)
+            cols[start:start+step] = b
+            rows[start:start+step] = uniq
+            start += step
+        X = sparse.csr_matrix((values, (rows, cols)), (2**d, 2**d))
+        XT = sparse.csr_matrix((values, (cols, rows)), (2**d, 2**d))
+        return X, XT
+
+    def __mul__(self, other):
+        if isinstance(other, MarginalsGram) and self.domain == other.domain:
+            X, XT = self._Xmatrix(self.weights)
+            vect = X.dot(other.weights)
+            return MarginalsGram(self.domain, vect)
+        else:
+            return EkteloMatrix.__mul__(self, other)
+
+    def inv(self):
+        assert self.weights[-1] != 0, 'matrix is not invertible'
+        X, _ = self._Xmatrix(self.weights)
+        z = np.zeros_like(self.weights)
+        z[-1] = 1.0
+        phi = spsolve_triangular(X, z, lower=False)
+        return MarginalsGram(self.domain, phi)
+
+    def ginv(self):
+        w = self.weights
+        X, _ = self._Xmatrix(w)
+        idx = X.dot(np.ones(w.size)) != 0
+        X = X[idx,:][:,idx] # to make solve_triangular work
+        phi = spsolve_triangular(X, w[idx], lower=False)
+        phi = spsolve_triangular(X, phi, lower=False)
+        ans = np.zeros(w.size)
+        ans[idx] = phi
+        return MarginalsGram(self.domain, ans)
+
+    def pinv(self):
+        return self.ginv()
+
+    def trace(self):
+        return self.weights.sum() * self.shape[1]
+
+    @staticmethod
+    def approximate(WtW):
+        """
+        Given a Sum-of-Kron matrix, find a MarginalsGram object that approximates it.
+        """
+        WtW = sum_kron_canonical(WtW)
+        dom = tuple(Wi.shape[1] for Wi in WtW.matrices[0].base.matrices)
+        weights = np.zeros(2**len(dom))
+        for sub in WtW.matrices:
+            tmp = []
+            for n, piece in zip(dom, sub.base.matrices):
+                X = piece.dense_matrix()
+                b = float(X.sum() - X.trace()) / (n * (n-1))
+                a = float(X.trace()) / n - b
+                tmp.append(np.array([b,a]))
+            weights += sub.weight * functools.reduce(np.kron, tmp)
+        return MarginalsGram(dom, weights)
+ 
+class AllNormK(EkteloMatrix):
+    def __init__(self, n, norms, dtype=np.float64):
+        """
+        All predicate queries that sum k elements of the domain
+        :param n: The domain size
+        :param norms: the L1 norm (number of 1s) of the queries (int or list of ints)
+        """
+        self.n = n
+        if type(norms) is int:
+            norms = [norms]
+        self.norms = norms
+        self.m = int(sum(binom(n, k) for k in norms))
+        self.shape = (self.m, self.n)
+        self.dtype = dtype
 
     @property
-    def hash(self):
-        m = hashlib.sha1()
-        m.update(util.prepare_for_hash(self.__class__.__name__))
-        m.update(util.prepare_for_hash(str(util.standardize(self.domain_shape))))
-        m.update(util.prepare_for_hash(str(util.standardize(self.prefix_axes))))
-        return m.hexdigest()
+    def matrix(self):
+        Q = np.zeros((self.m, self.n))
+        idx = 0
+        for k in self.norms:
+            for q in itertools.combinations(range(self.n), k):
+                Q[idx, q] = 1.0
+                idx += 1
+        return Q
 
-def merge(q1, q2):
-    ''' merge an n dimensional query and an m dimensional query into an (n+m) dimensional query '''
-    ans = ndRangeUnion()
-    for (lb1, ub1, wgt1) in q1.ranges:
-        for (lb2, ub2, wgt2) in q2.ranges:
-            ans.addRange(lb1 + lb2, ub1 + ub2, wgt1 * wgt2)
-    return ans
+    def gram(self):
+        # WtW[i,i] = binom(n-1, k-1) (1 for each query having q[i] = 1)
+        # WtW[i,j] = binom(n-2, k-2) (1 for each query having q[i] = q[j] = 1)
+        n = self.n
+        diag = sum(binom(n-1, k-1) for k in self.norms)
+        off = sum(binom(n-2, k-2) for k in self.norms)
+        return off*Ones(n,n) + (diag-off)*Identity(n)
 
-def kron(W1, W2):
-    ''' merge an n dimensional workload and an m dimensional workload into an (n+m) dimensional workl
-oad '''
-    dom1, dom2 = W1.domain_shape, W2.domain_shape
-    queries = [merge(q1, q2) for q1 in W1.query_list for q2 in W2.query_list]
-    return Workload(queries, dom1 + dom2)
-
-# (Workload, kron) is a monoid with identity element zero
-def kronecker(workloads):
-    ''' merge a list of low dimensional workloads into a single high dimensional workload '''
-    zq = ndRangeUnion().addRange(tuple(), tuple(), 1.0)
-    zero = Workload([zq], tuple())
-    return reduce(kron, workloads, zero)
-
-def linop_kron(A, B):
+class Disjuncts(Sum):
     """
-    Compute the kron product between two scipy.sparse.LinearOperators
-
-    :param A: A m1 x n1 linear operator
-    :param B: A m2 x n2 linear operator
-    :returns: A new linear operator of size m1*m2 x n1*n2 representing the matrix kron(A,B)
-
+    Just like the Kron workload class can represent a cartesian product of predicate counting
+    queries where the predicates are conjunctions, this workload class can represent a cartesian
+    product of predicate counting queries where the predicates are disjunctions.
     """
-    # if A and B are both sparse matrices, we are better off explicitly computing kron product
-    if isinstance(A, linalg.interface.MatrixLinearOperator) and \
-        isinstance(B, linalg.interface.MatrixLinearOperator) and \
-        sparse.isspmatrix(A.A) and sparse.issparse(B.A):
-        return linalg.aslinearoperator(sparse.kron(A.A,B.A))
+    #TODO: check implementation after refactoring
+    def __init__(self, workloads):
+        # q or r = - (-q and -r)
+        # W = 1 x 1 - (Q1 x R1)
 
-    am, an = A.shape
-    bm, bn = B.shape
-    shape = (am*bm, an*bn)
-    # These expressions are derived from the matrix equations
-    # vec(A X B) = kron(A, B^T) vec(X) where vec(Z) is Z.flatten()
-    def matvec(x):
-        X = x.reshape(an, bn, order='C')
-        return B.matmat(A.matmat(X).T).T.flatten(order='C')
-    def rmatvec(x):
-        X = x.reshape(am, bm, order='C')
-        return B.H.matmat(A.H.matmat(X).T).T.flatten(order='C')
-    return linalg.LinearOperator(shape, matvec, rmatvec, dtype=numpy.float64)
+        self.A = Kronecker([Ones(*W.shape) for W in workloads]) # totals
+        self.B = -1*Kronecker([Ones(*W.shape) - W for W in workloads]) # negations
+        Sum.__init__(self, [self.A, self.B])
 
+    def gram(self):
+        return Sum([self.A.gram(), self.A.T @ self.B, self.B.T @ self.A, self.B.gram()])
 
+class ExplicitGram:
+    # not an Ektelo Matrix, but behaves like it in the sense that it has gram function,
+    # meaning strategy optimization is possible
+    def __init__(self, matrix):
+        self.matrix = matrix
     
+    def gram(self):
+        return EkteloMatrix(self.matrix)
+
+def RandomRange(shape_list, domain, size, seed=9001):
+    if type(domain) is int:
+        domain = (domain,)
+
+    prng = np.random.RandomState(seed)
+    queries = []
+
+    for i in range(size):
+        if shape_list is None:
+            shape = tuple(prng.randint(1, dim+1, None) for dim in domain)
+        else:
+            shape = shape_list[np.random.randint(len(shape_list))]
+        lb = tuple(prng.randint(0, d - q + 1, None) for d,q in zip(domain, shape))
+        ub = tuple(sum(x)-1 for x in zip(lb, shape))
+        queries.append( (lb, ub) )
+
+    return RangeQueries.fromlist(domain, queries) 
+
+def Moments(n, k=3):
+    N = np.arange(n)
+    K = np.arange(1,k+1)
+    W = N[None]**K[:,None]
+    return EkteloMatrix(W)
+
+def WidthKRange(n, widths):
+    if type(widths) is int:
+        widths = [widths]
+    m = sum(n-k+1 for k in widths)
+    W = np.zeros((m, n))
+    row = 0
+    for k in widths:
+        for i in range(n-k+1):
+            W[row+i, i:i+k] = 1.0
+        row += n - k + 1
+    return EkteloMatrix(W)
+
+def DimKMarginals(domain, dims):
+    if type(dims) is int:
+        dims = [dims]
+    weights = {}
+    for key in itertools.product(*[[1,0]]*len(domain)):
+        if sum(key) in dims:
+            weights[key] = 1.0
+    return Marginals.frombinary(domain, weights)
+
+def Range2D(n):
+    return Kronecker([AllRange(n), AllRange(n)])
+
+def Prefix2D(n):
+    return Kronecker([Prefix(n), Prefix(n)]) 
+
+def sum_kron_canonical(WtW):
+    if isinstance(WtW, Kronecker):
+        return Sum([1.0 * WtW])
+    elif isinstance(WtW, Weighted) and isinstance(WtW.base, Kronecker):
+        return Sum([WtW])
+    elif isinstance(WtW, Sum):
+        return Sum([1.0 * X for X in WtW.matrices])
+    elif isinstance(WtW, Weighted) and isinstance(WtW.base, Sum):
+        c = WtW.weight
+        return Sum([c * X for X in WtW.base.matrices])
+    else:
+        raise ValueError('Input format not recognized')
