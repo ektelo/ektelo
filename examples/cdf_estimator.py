@@ -83,10 +83,10 @@ def Client(kernel_service, domain, eta, ratio, n):
     x_hat = support.expansion_matrix(mapping) * x_bar_hat
 
     # A Prefix workload of queries
-    W = workload.Prefix1D(n)
+    W = workload.Prefix(n)
 
     # Report query results
-    print(W.get_matrix() * x_hat)
+    print(W.matrix * x_hat)
 
 
 # Setup arbitrary private constants

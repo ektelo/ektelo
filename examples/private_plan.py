@@ -44,7 +44,7 @@ epsilon = eps_total / 2
 W = workload.RandomRange(None, (np.prod(domain),), 25)
 
 # Calculate noisy estimate of x
-x_hat = private.Mwem(domain, ratio, rounds, data_scale, use_history).Run(W, x, epsilon)
+x_hat = private.Mwem(ratio, rounds, data_scale, domain, use_history).Run(W, x, epsilon)
 
 # Report noisy query responses
-print(W.get_matrix() * x_hat)
+print(W.matrix * x_hat)

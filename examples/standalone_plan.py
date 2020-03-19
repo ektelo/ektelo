@@ -38,4 +38,4 @@ W = workload.RandomRange(None, (np.prod(domain),), 25)
 x_hat = standalone.Mwem(ratio, rounds, data_scale, domain, use_history).Run(W, x, epsilon, seed)
 
 # Report noisy query responses
-print(W.get_matrix() * x_hat)
+print(W.matrix * x_hat)
